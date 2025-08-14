@@ -1,0 +1,171 @@
+name: Shell quality
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: write      # required for review comments
+  checks: write             # if you switch to github-check
+  security-events: write    # for SARIF upload below
+
+env:
+  # File at repo root listing folders to scan (see section 6)
+  SHELL_PATHS_FILE: ".shell_paths"
+
+jobs:
+  lint-shell:
+    if: github.event.pull_request.draft == false || github.event_name == 'push'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install tools (shellcheck, shfmt)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck
+          SHFMT_VERSION=3.7.0
+          curl -sSL https://github.com/mvdan/sh/releases/download/v${SHFMT_VERSION}/shfmt_v${SHFMT_VERSION}_linux_amd64 -o /usr/local/bin/shfmt
+          chmod +x /usr/local/bin/shfmt
+
+      - name: Setup reviewdog
+        uses: reviewdog/action-setup@v1
+        with:
+          reviewdog_version: latest
+
+      - name: Build file list from .shell_paths (recursively)
+        id: files
+        shell: bash
+        run: |
+          set -euo pipefail
+          tmp="$(mktemp)"
+          # Helper to detect shell scripts (with or without extensions)
+          detect_shell() {
+            # read list from stdin, output NUL-separated confirmed shell files
+            while IFS= read -r -d '' f; do
+              if head -c 1024 "$f" | grep -aqE '^#!.*\b(bash|sh|zsh)\b'; then
+                printf '%s\0' "$f"
+              fi
+            done
+          }
+          if [[ -f "$SHELL_PATHS_FILE" ]]; then
+            # Read non-empty, non-comment lines as directories
+            mapfile -t dirs < <(sed -E 's/#.*$//; s/^[[:space:]]+|[[:space:]]+$//g; /^$/d' "$SHELL_PATHS_FILE")
+            if ((${#dirs[@]})); then
+              # 1) files by extension
+              while IFS= read -r -d '' f; do printf '%s\0' "$f"; done < <(
+                printf '%s\0' "${dirs[@]}" |
+                xargs -0 -I{} find "{}" -type f -regextype posix-extended \
+                  -regex '.*\.(sh|bash|zsh)$' -print0 2>/dev/null
+              ) > "$tmp"
+              # 2) executables with shebang to shell
+              printf '%s\0' "${dirs[@]}" |
+              xargs -0 -I{} find "{}" -type f -perm -111 -print0 2>/dev/null |
+              detect_shell >> "$tmp"
+            else
+              : > "$tmp"
+            fi
+          else
+            # fallback: whole repo
+            while IFS= read -r -d '' f; do printf '%s\0' "$f"; done < <(
+              git ls-files -z -- '*.sh' '*.bash' '*.zsh'
+            ) > "$tmp"
+            git ls-files -z | xargs -0 -I{} -- file -b "{}" | paste -d '\0' - - |
+            awk -v RS='\0' 'NR%2==1{f=$0} NR%2==0{ if($0 ~ /shell script/) print f "\0" }' >> "$tmp"
+          fi
+          # De-dup & save
+          tr '\0' '\n' < "$tmp" | sort -u | tr '\n' '\0' > files.list
+          count=$(tr -cd '\0' < files.list | wc -c)
+          echo "count=$count" >> "$GITHUB_OUTPUT"
+
+      # --- SHELLCHECK (best practices) → inline PR review comments
+      - name: Run shellcheck and reviewdog (PR comments)
+        if: steps.files.outputs.count != '0'
+        shell: bash
+        env:
+          REVIEWDOG_GITHUB_API_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # shellcheck output as checkstyle → reviewdog
+          xargs -0 shellcheck -f checkstyle --external-sources --severity=style < files.list \
+            > shellcheck_checkstyle.xml || true
+          reviewdog -f=checkstyle -name="shellcheck" \
+            -reporter=github-pr-review -level=warning -filter-mode=diff \
+            -fail-on-error=false -tee < shellcheck_checkstyle.xml
+
+      # --- SHFMT (formatting) → suggested changes you can one-click apply
+      - name: Generate shfmt diff
+        id: shfmt
+        shell: bash
+        run: |
+          set -o pipefail
+          if [[ "${{ steps.files.outputs.count }}" == "0" ]]; then
+            echo "has_diff=false" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          # shfmt desired style; adjust flags if you prefer other formatting
+          # -ci: indent switch cases, -s: simplify, -fn: keep func names on one line, -d: diff
+          xargs -0 shfmt -ci -s -fn -d < files.list > shfmt.diff || true
+          if [[ -s shfmt.diff ]]; then
+            echo "has_diff=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_diff=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Review shfmt suggestions with reviewdog
+        if: steps.shfmt.outputs.has_diff == 'true'
+        uses: reviewdog/reviewdog@v0
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          reporter: github-pr-review
+          filter_mode: diff
+          fail_on_error: false
+          format: diff
+          name: shfmt
+          input_file: shfmt.diff
+
+  # Optional: Code scanning tab (SARIF) — complements PR comments
+  code-scanning:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install shellcheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck
+
+      - name: Build file list from .shell_paths (same logic, simplified)
+        id: files
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -f ".shell_paths" ]]; then
+            mapfile -t dirs < <(sed -E 's/#.*$//; s/^[[:space:]]+|[[:space:]]+$//g; /^$/d' ".shell_paths")
+            if ((${#dirs[@]})); then
+              { for d in "${dirs[@]}"; do
+                  find "$d" -type f \( -name '*.sh' -o -name '*.bash' -o -name '*.zsh' \);
+                done; } > files.txt || true
+            else : > files.txt; fi
+          else
+            git ls-files '*.sh' '*.bash' '*.zsh' > files.txt
+          fi
+          echo "count=$(wc -l < files.txt | tr -d ' ')" >> "$GITHUB_OUTPUT"
+
+      - name: Run shellcheck → SARIF
+        if: steps.files.outputs.count != '0'
+        run: |
+          # Use -S style to include nits/best practices too
+          xargs -a files.txt shellcheck -f sarif -S style > shellcheck.sarif || true
+
+      - name: Upload SARIF
+        if: steps.files.outputs.count != '0'
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: shellcheck.sarif
