@@ -116,4 +116,145 @@ jobs:
       - name: Setup reviewdog
         uses: reviewdog/action-setup@v1
         with:
-          reviewdog_v_
+          reviewdog_version: latest
+
+      - name: Build file list (extensions + shebang scan)
+        id: files
+        shell: bash
+        run: |
+          set -euo pipefail
+          tmp="$(mktemp)"
+          detect_shell() {
+            while IFS= read -r -d '' f; do
+              if head -c 1024 "$f" | grep -aqE '^#!.*\b(bash|sh|zsh)\b'; then
+                printf '%s\0' "$f"
+              fi
+            done
+          }
+          if [[ -f "$SHELL_PATHS_FILE" ]]; then
+            mapfile -t dirs < <(sed -E 's/#.*$//; s/^[[:space:]]+|[[:space:]]+$//g; /^$/d' "$SHELL_PATHS_FILE")
+            if ((${#dirs[@]})); then
+              while IFS= read -r -d '' f; do printf '%s\0' "$f"; done < <(
+                printf '%s\0' "${dirs[@]}" |
+                xargs -0 -I{} find "{}" -type f -regextype posix-extended \
+                  -regex '.*\.(sh|bash|zsh)$' -print0 2>/dev/null
+              ) > "$tmp"
+              printf '%s\0' "${dirs[@]}" |
+              xargs -0 -I{} find "{}" -type f -perm -111 -print0 2>/dev/null |
+              detect_shell >> "$tmp"
+            else : > "$tmp"; fi
+          else
+            git ls-files -z -- '*.sh' '*.bash' '*.zsh' > "$tmp"
+            git ls-files -z | xargs -0 -I{} -- file -b "{}" | paste -d '\0' - - |
+            awk -v RS='\0' 'NR%2==1{f=$0} NR%2==0{ if($0 ~ /shell script/) print f "\0" }' >> "$tmp"
+          fi
+          tr '\0' '\n' < "$tmp" | sort -u | tee files.debug | tr '\n' '\0' > files.list
+          echo "count=$(tr -cd '\0' < files.list | wc -c)" >> "$GITHUB_OUTPUT"
+          echo "== Files considered =="; cat files.debug
+
+      - name: (Debug) Show first lines of each file
+        if: env.DEBUG == 'true' && steps.files.outputs.count != '0'
+        run: |
+          while IFS= read -r f; do
+            echo "----- $f -----"
+            sed -n '1,200p' "$f"
+          done < files.debug
+
+      - name: shellcheck with reviewdog (PR comments; non-blocking)
+        if: steps.files.outputs.count != '0' && github.event_name == 'pull_request'
+        env:
+          REVIEWDOG_GITHUB_API_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set +e
+          xargs -0 shellcheck -f checkstyle --external-sources --severity=style < files.list \
+            > shellcheck_checkstyle.xml || true
+          reviewdog -f=checkstyle -name="shellcheck" \
+            -reporter=github-pr-review -level=warning -filter-mode=diff \
+            -fail-on-error=false -tee < shellcheck_checkstyle.xml
+
+      - name: Generate shfmt diff
+        if: steps.files.outputs.count != '0' && github.event_name == 'pull_request'
+        id: shfmt
+        run: |
+          set -e
+          xargs -0 shfmt -i 2 -ci -s -fn -d < files.list > shfmt.diff || true
+          if [[ -s shfmt.diff ]]; then echo "has_diff=true" >> "$GITHUB_OUTPUT"; else echo "has_diff=false" >> "$GITHUB_OUTPUT"; fi
+
+      - name: shfmt suggestions with reviewdog (PR comments; non-blocking)
+        if: steps.shfmt.outputs.has_diff == 'true'
+        uses: reviewdog/reviewdog@v0
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          reporter: github-pr-review
+          filter_mode: diff
+          fail_on_error: false
+          format: diff
+          name: shfmt
+          input_file: shfmt.diff
+
+      - name: shellcheck → SARIF (non-blocking)
+        if: steps.files.outputs.count != '0'
+        run: |
+          xargs -0 shellcheck -f sarif -S style < files.list > shellcheck.sarif || true
+
+      - name: Upload SARIF
+        if: steps.files.outputs.count != '0'
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: shellcheck.sarif
+
+  # ================= 2) Blocking gatekeeper (use in Branch protection) =================
+  gatekeeper:
+    name: Shell gatekeeper (blocking)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request' && github.event.pull_request.draft == false
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install tools
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y shellcheck
+          SHFMT_VERSION=3.9.0
+          curl -sSL https://github.com/mvdan/sh/releases/download/v${SHFMT_VERSION}/shfmt_v${SHFMT_VERSION}_linux_amd64.tar.gz \
+            | sudo tar -xz -C /usr/local/bin shfmt
+          echo "== Versions =="; shellcheck --version; shfmt -version
+
+      - name: Find shell scripts (fast path by extensions)
+        id: files
+        run: |
+          set -euo pipefail
+          mapfile -t scripts < <(git ls-files \
+            '*.sh' '*.bash' '*.zsh' ':!:**/node_modules/**' ':!:**/vendor/**')
+          printf '%s\n' "${scripts[@]}" | tee scripts.txt
+          echo "count=${#scripts[@]}" >> "$GITHUB_OUTPUT"
+
+      - name: Skip if none
+        if: steps.files.outputs.count == '0'
+        run: echo "No shell files in repo — skipping gatekeeper." && exit 0
+
+      - name: Syntax check (bash -n / zsh -n)
+        run: |
+          set -euo pipefail
+          echo "== Syntax check =="
+          while read -r f; do
+            case "$f" in
+              *.zsh)  echo "zsh -n $f";  zsh -n "$f" ;;
+              *)      echo "bash -n $f"; bash -n "$f" ;;
+            esac
+          done < scripts.txt
+
+      - name: shellcheck (fail on findings)
+        run: |
+          set -euo pipefail
+          echo "== shellcheck findings (if any) =="
+          xargs -a scripts.txt shellcheck -x -S style -f gcc
+
+      - name: shfmt (enforce formatting; fail on diff)
+        run: |
+          set -euo pipefail
+          echo "== shfmt diff (should be empty) =="
+          shfmt -i 2 -ci -d $(cat scripts.txt)
