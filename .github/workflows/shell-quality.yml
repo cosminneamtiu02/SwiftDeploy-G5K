@@ -19,7 +19,6 @@ permissions:
   security-events: write
 
 env:
-  # Optional file at repo root listing directories for the advisory job to scan
   SHELL_PATHS_FILE: ".shell_paths"
 
 jobs:
@@ -57,7 +56,6 @@ jobs:
           EOF
           chmod +x .ci-selftest/good.sh
 
-          # has: unquoted var + formatting issues
           cat > .ci-selftest/bad.sh <<'EOF'
           #!/usr/bin/env bash
           set -euo pipefail
@@ -183,7 +181,7 @@ jobs:
 
       - name: shfmt suggestions with reviewdog (PR comments; non-blocking)
         if: ${{ steps.shfmt.outputs.has_diff == 'true' }}
-        uses: reviewdog/reviewdog@v0
+        uses: reviewdog/action-reviewdog@v1
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           reporter: github-pr-review
