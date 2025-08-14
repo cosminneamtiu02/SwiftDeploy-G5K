@@ -19,18 +19,16 @@ permissions:
   security-events: write
 
 env:
-  # true when: manual run with debug=true OR PR has label "ci-debug"
-  DEBUG: ${{ (github.event_name == 'workflow_dispatch' && inputs.debug)
-           || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci-debug')) }}
-  # Optional file at repo root listing directories to scan for the advisory job
+  # Optional file at repo root listing directories for the advisory job to scan
   SHELL_PATHS_FILE: ".shell_paths"
 
 jobs:
-  # ================= 0) Sanity/self-test (only in debug mode) =================
+  # ================= 0) Sanity/self-test (only when debug is on) =================
   sanity_debug:
     name: Sanity & self-test
     runs-on: ubuntu-latest
-    if: env.DEBUG == 'true'
+    if: ${{ (github.event_name == 'workflow_dispatch' && inputs.debug)
+          || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci-debug')) }}
 
     steps:
       - name: Checkout
@@ -94,7 +92,7 @@ jobs:
           bash -n .ci-selftest/bad.sh
           echo "Syntax OK"
 
-  # ================= 1) Advisory reviewer (comments + SARIF; non-blocking) =================
+  # ================= 1) Advisory reviewer (PR comments + SARIF; non-blocking) =================
   reviewer_advice:
     name: Shell review (advisory)
     runs-on: ubuntu-latest
@@ -153,7 +151,10 @@ jobs:
           echo "== Files considered =="; cat files.debug
 
       - name: (Debug) Show first lines of each file
-        if: env.DEBUG == 'true' && steps.files.outputs.count != '0'
+        if: ${{ steps.files.outputs.count != '0' && (
+                (github.event_name == 'workflow_dispatch' && inputs.debug) ||
+                (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci-debug'))
+              ) }}
         run: |
           while IFS= read -r f; do
             echo "----- $f -----"
@@ -161,7 +162,7 @@ jobs:
           done < files.debug
 
       - name: shellcheck with reviewdog (PR comments; non-blocking)
-        if: steps.files.outputs.count != '0' && github.event_name == 'pull_request'
+        if: ${{ steps.files.outputs.count != '0' && github.event_name == 'pull_request' }}
         env:
           REVIEWDOG_GITHUB_API_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -173,7 +174,7 @@ jobs:
             -fail-on-error=false -tee < shellcheck_checkstyle.xml
 
       - name: Generate shfmt diff
-        if: steps.files.outputs.count != '0' && github.event_name == 'pull_request'
+        if: ${{ steps.files.outputs.count != '0' && github.event_name == 'pull_request' }}
         id: shfmt
         run: |
           set -e
@@ -181,7 +182,7 @@ jobs:
           if [[ -s shfmt.diff ]]; then echo "has_diff=true" >> "$GITHUB_OUTPUT"; else echo "has_diff=false" >> "$GITHUB_OUTPUT"; fi
 
       - name: shfmt suggestions with reviewdog (PR comments; non-blocking)
-        if: steps.shfmt.outputs.has_diff == 'true'
+        if: ${{ steps.shfmt.outputs.has_diff == 'true' }}
         uses: reviewdog/reviewdog@v0
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
@@ -193,12 +194,12 @@ jobs:
           input_file: shfmt.diff
 
       - name: shellcheck → SARIF (non-blocking)
-        if: steps.files.outputs.count != '0'
+        if: ${{ steps.files.outputs.count != '0' }}
         run: |
           xargs -0 shellcheck -f sarif -S style < files.list > shellcheck.sarif || true
 
       - name: Upload SARIF
-        if: steps.files.outputs.count != '0'
+        if: ${{ steps.files.outputs.count != '0' }}
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: shellcheck.sarif
@@ -207,7 +208,7 @@ jobs:
   gatekeeper:
     name: Shell gatekeeper (blocking)
     runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request' && github.event.pull_request.draft == false
+    if: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft == false }}
 
     steps:
       - name: Checkout
@@ -233,7 +234,7 @@ jobs:
           echo "count=${#scripts[@]}" >> "$GITHUB_OUTPUT"
 
       - name: Skip if none
-        if: steps.files.outputs.count == '0'
+        if: ${{ steps.files.outputs.count == '0' }}
         run: echo "No shell files in repo — skipping gatekeeper." && exit 0
 
       - name: Syntax check (bash -n / zsh -n)
