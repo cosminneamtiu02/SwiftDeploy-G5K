@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+echo "I have no extension but I'm a shell script"
+EOF
+chmod +x tools/runner
