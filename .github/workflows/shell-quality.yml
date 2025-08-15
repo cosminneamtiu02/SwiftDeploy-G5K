@@ -125,39 +125,75 @@ jobs:
         with:
           reviewdog_version: latest
 
+      - name: (Debug) reviewdog smoke check (commit check)
+        if: ${{ (github.event_name == 'workflow_dispatch' && inputs.debug)
+              || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci-debug')) }}
+        env:
+          REVIEWDOG_GITHUB_API_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          printf 'smoke.sh:1:1: reviewdog is able to post (smoke)\n' | \
+            reviewdog \
+              -efm='%f:%l:%c: %m' \
+              -name='reviewdog smoke' \
+              -reporter=github-check \
+              -level=info \
+              -tee
+
+      - name: (Debug) reviewdog smoke (PR review comment)
+        if: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci-debug') }}
+        env:
+          REVIEWDOG_GITHUB_API_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          printf 'smoke.sh:1:1: inline review comment (smoke)\n' | \
+            reviewdog \
+              -efm='%f:%l:%c: %m' \
+              -name='reviewdog smoke (pr-review)' \
+              -reporter=github-pr-review \
+              -filter-mode=diff \
+              -level=info \
+              -tee
+
       - name: Build file list (extensions + shebang scan)
         id: files
         shell: bash
         run: |
           set -euo pipefail
-          tmp="$(mktemp)"
-          detect_shell() {
+
+          if [[ -f "$SHELL_PATHS_FILE" ]]; then
+            mapfile -t SCAN_DIRS < <(sed -E 's/#.*$//; s/^[[:space:]]+|[[:space:]]+$//g; /^$/d' "$SHELL_PATHS_FILE")
+            if ((${#SCAN_DIRS[@]} == 0)); then SCAN_DIRS=(.); fi
+          else
+            SCAN_DIRS=(.)
+          fi
+
+          find_ext() {
+            printf '%s\0' "${SCAN_DIRS[@]}" | \
+            xargs -0 -I{} find "{}" \
+              -type d \( -name node_modules -o -name vendor \) -prune -o \
+              -type f \( -name '*.sh' -o -name '*.bash' -o -name '*.zsh' \) -print0 2>/dev/null
+          }
+          find_exec_shebang() {
+            printf '%s\0' "${SCAN_DIRS[@]}" | \
+            xargs -0 -I{} find "{}" \
+              -type d \( -name node_modules -o -name vendor \) -prune -o \
+              -type f -perm -111 -print0 2>/dev/null | \
             while IFS= read -r -d '' f; do
               if head -c 1024 "$f" | grep -aqE '^#!.*\b(bash|sh|zsh)\b'; then
                 printf '%s\0' "$f"
               fi
             done
           }
-          if [[ -f "$SHELL_PATHS_FILE" ]]; then
-            mapfile -t dirs < <(sed -E 's/#.*$//; s/^[[:space:]]+|[[:space:]]+$//g; /^$/d' "$SHELL_PATHS_FILE")
-            if ((${#dirs[@]})); then
-              while IFS= read -r -d '' f; do printf '%s\0' "$f"; done < <(
-                printf '%s\0' "${dirs[@]}" |
-                xargs -0 -I{} find "{}" -type f -regextype posix-extended \
-                  -regex '.*\.(sh|bash|zsh)$' -print0 2>/dev/null
-              ) > "$tmp"
-              printf '%s\0' "${dirs[@]}" |
-              xargs -0 -I{} find "{}" -type f -perm -111 -print0 2>/dev/null |
-              detect_shell >> "$tmp"
-            else : > "$tmp"; fi
-          else
-            git ls-files -z -- '*.sh' '*.bash' '*.zsh' > "$tmp"
-            git ls-files -z | xargs -0 -I{} -- file -b "{}" | paste -d '\0' - - |
-            awk -v RS='\0' 'NR%2==1{f=$0} NR%2==0{ if($0 ~ /shell script/) print f "\0" }' >> "$tmp"
-          fi
+
+          tmp="$(mktemp)"
+          { find_ext; find_exec_shebang; } > "$tmp" || true
+
           tr '\0' '\n' < "$tmp" | sort -u | tee files.debug | tr '\n' '\0' > files.list
-          echo "count=$(tr -cd '\0' < files.list | wc -c)" >> "$GITHUB_OUTPUT"
-          echo "== Files considered =="; cat files.debug
+
+          count=$(tr -cd '\0' < files.list | wc -c | tr -d ' ')
+          echo "count=$count" >> "$GITHUB_OUTPUT"
+
+          echo "== Files considered =="
+          cat files.debug
 
       - name: (Debug) Show first lines of each file
         if: ${{ steps.files.outputs.count != '0' && (
