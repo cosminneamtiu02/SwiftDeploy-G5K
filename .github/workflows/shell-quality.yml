@@ -38,8 +38,15 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y shellcheck
           SHFMT_VERSION=3.9.0
-          curl -sSL https://github.com/mvdan/sh/releases/download/v${SHFMT_VERSION}/shfmt_v${SHFMT_VERSION}_linux_amd64.tar.gz \
-            | sudo tar -xz -C /usr/local/bin shfmt
+          OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+          ARCH=$(uname -m)
+          case "$ARCH" in
+            x86_64) ARCH=amd64 ;;
+            aarch64) ARCH=arm64 ;;
+          esac
+          curl -sSL -o /usr/local/bin/shfmt \
+            "https://github.com/mvdan/sh/releases/download/v${SHFMT_VERSION}/shfmt_v${SHFMT_VERSION}_${OS}_${ARCH}"
+          sudo chmod +x /usr/local/bin/shfmt
           shellcheck --version
           shfmt -version
 
@@ -102,8 +109,15 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y shellcheck
           SHFMT_VERSION=3.9.0
-          curl -sSL https://github.com/mvdan/sh/releases/download/v${SHFMT_VERSION}/shfmt_v${SHFMT_VERSION}_linux_amd64.tar.gz \
-            | sudo tar -xz -C /usr/local/bin shfmt
+          OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+          ARCH=$(uname -m)
+          case "$ARCH" in
+            x86_64) ARCH=amd64 ;;
+            aarch64) ARCH=arm64 ;;
+          esac
+          curl -sSL -o /usr/local/bin/shfmt \
+            "https://github.com/mvdan/sh/releases/download/v${SHFMT_VERSION}/shfmt_v${SHFMT_VERSION}_${OS}_${ARCH}"
+          sudo chmod +x /usr/local/bin/shfmt
           echo "== Versions =="; shellcheck --version; shfmt -version
 
       - name: Setup reviewdog (pinned)
@@ -211,8 +225,15 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y shellcheck
           SHFMT_VERSION=3.9.0
-          curl -sSL https://github.com/mvdan/sh/releases/download/v${SHFMT_VERSION}/shfmt_v${SHFMT_VERSION}_linux_amd64.tar.gz \
-            | sudo tar -xz -C /usr/local/bin shfmt
+          OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+          ARCH=$(uname -m)
+          case "$ARCH" in
+            x86_64) ARCH=amd64 ;;
+            aarch64) ARCH=arm64 ;;
+          esac
+          curl -sSL -o /usr/local/bin/shfmt \
+            "https://github.com/mvdan/sh/releases/download/v${SHFMT_VERSION}/shfmt_v${SHFMT_VERSION}_${OS}_${ARCH}"
+          sudo chmod +x /usr/local/bin/shfmt
           echo "== Versions =="; shellcheck --version; shfmt -version
 
       - name: Find shell scripts (fast path by extensions)
