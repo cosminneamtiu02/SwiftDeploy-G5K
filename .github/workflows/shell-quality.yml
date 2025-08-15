@@ -30,8 +30,7 @@ jobs:
           || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci-debug')) }}
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Install tools
         run: |
@@ -55,7 +54,6 @@ jobs:
           echo "$msg"
           EOF
           chmod +x .ci-selftest/good.sh
-
           cat > .ci-selftest/bad.sh <<'EOF'
           #!/usr/bin/env bash
           set -euo pipefail
@@ -96,8 +94,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Install tools
         run: |
@@ -109,8 +106,8 @@ jobs:
             | sudo tar -xz -C /usr/local/bin shfmt
           echo "== Versions =="; shellcheck --version; shfmt -version
 
-      - name: Setup reviewdog
-        uses: reviewdog/action-setup@v1
+      - name: Setup reviewdog (pinned)
+        uses: reviewdog/action-setup@e04ffabe3898a0af8d0fb1af00c188831c4b5893 # v1.3.2
         with:
           reviewdog_version: latest
 
@@ -179,17 +176,14 @@ jobs:
           xargs -0 shfmt -i 2 -ci -s -fn -d < files.list > shfmt.diff || true
           if [[ -s shfmt.diff ]]; then echo "has_diff=true" >> "$GITHUB_OUTPUT"; else echo "has_diff=false" >> "$GITHUB_OUTPUT"; fi
 
-      - name: shfmt suggestions with reviewdog (PR comments; non-blocking)
+      - name: shfmt suggestions via reviewdog (PR comments; non-blocking)
         if: ${{ steps.shfmt.outputs.has_diff == 'true' }}
-        uses: reviewdog/action-reviewdog@v1
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          reporter: github-pr-review
-          filter_mode: diff
-          fail_on_error: false
-          format: diff
-          name: shfmt
-          input_file: shfmt.diff
+        env:
+          REVIEWDOG_GITHUB_API_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          reviewdog -f=diff -name="shfmt" \
+            -reporter=github-pr-review -filter-mode=diff \
+            -fail-on-error=false -tee < shfmt.diff
 
       - name: shellcheck → SARIF (non-blocking)
         if: ${{ steps.files.outputs.count != '0' }}
@@ -209,8 +203,7 @@ jobs:
     if: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft == false }}
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Install tools
         run: |
