@@ -195,15 +195,34 @@ jobs:
             -reporter=github-pr-review -filter-mode=added \
             -fail-on-error=false -tee < shfmt.diff || true
 
-      # ---- SARIF with guard (prevents "Invalid SARIF" on empty/truncated output)
+      # ---- SARIF with strong guard (always valid SARIF)
       - name: shellcheck → SARIF (non-blocking)
         if: ${{ steps.files.outputs.count != '0' }}
         run: |
           set -e
+          # Try to produce SARIF from shellcheck
           xargs -0 shellcheck -f sarif -S style < files.list > shellcheck.sarif || true
-          if [[ ! -s shellcheck.sarif ]]; then
-            echo "No SARIF output generated, creating empty stub."
-            echo '{"version":"2.1.0","runs":[]}' > shellcheck.sarif
+
+          # If the SARIF is missing or suspiciously tiny, create a minimal valid one
+          if [[ ! -s shellcheck.sarif ]] || [[ $(wc -c < shellcheck.sarif) -lt 40 ]]; then
+            echo "Creating minimal valid SARIF stub (no results)."
+            cat > shellcheck.sarif <<'JSON'
+          {
+            "version": "2.1.0",
+            "runs": [
+              {
+                "tool": {
+                  "driver": {
+                    "name": "shellcheck",
+                    "informationUri": "https://www.shellcheck.net",
+                    "version": "0.9.0"
+                  }
+                },
+                "results": []
+              }
+            ]
+          }
+          JSON
           fi
 
       - name: Debug SARIF file (size & head)
@@ -219,6 +238,21 @@ jobs:
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: shellcheck.sarif
+          wait-for-processing: true
+
+      - name: Upload advisory artifacts (optional)
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: advisory-assets
+          path: |
+            files.debug
+            files.list
+            shellcheck_checkstyle.xml
+            shfmt.diff
+            shellcheck.sarif
+          if-no-files-found: ignore
+          retention-days: 7
 
       # Optional: confirm reviewdog can post (label PR with `ci-debug`)
       - name: (Debug) reviewdog smoke (PR review comment)
