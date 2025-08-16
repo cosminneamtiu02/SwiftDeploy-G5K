@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 msg=hello
-echo ${msg}
+echo "${msg}"
 if [[ "${msg}" = "hello" ]]; then
-echo ok
+echo "ok"
 fi
