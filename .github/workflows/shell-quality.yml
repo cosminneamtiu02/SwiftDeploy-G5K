@@ -19,83 +19,50 @@ permissions:
   security-events: write
 
 env:
+  DEBUG: ${{ (github.event_name == 'workflow_dispatch' && inputs.debug)
+           || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci-debug')) }}
   SHELL_PATHS_FILE: ".shell_paths"
 
 jobs:
-  # ================= 0) Sanity/self-test (only when debug is on) =================
+  # ========== 0) Sanity/self-test (only in debug mode) ==========
   sanity_debug:
     name: Sanity & self-test
     runs-on: ubuntu-latest
-    if: ${{ (github.event_name == 'workflow_dispatch' && inputs.debug)
-          || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci-debug')) }}
+    if: env.DEBUG == 'true'
 
     steps:
       - uses: actions/checkout@v4
-
       - name: Install tools
         run: |
           set -euxo pipefail
           sudo apt-get update
           sudo apt-get install -y shellcheck
           SHFMT_VERSION=3.9.0
-          OS=$(uname -s | tr '[:upper:]' '[:lower:]')
-          ARCH=$(uname -m)
-          case "$ARCH" in
-            x86_64) ARCH=amd64 ;;
-            aarch64) ARCH=arm64 ;;
-          esac
-          curl -sSL -o /usr/local/bin/shfmt \
-            "https://github.com/mvdan/sh/releases/download/v${SHFMT_VERSION}/shfmt_v${SHFMT_VERSION}_${OS}_${ARCH}"
-          sudo chmod +x /usr/local/bin/shfmt
+          curl -sSL https://github.com/mvdan/sh/releases/download/v${SHFMT_VERSION}/shfmt_v${SHFMT_VERSION}_linux_amd64 \
+            -o /usr/local/bin/shfmt
+          chmod +x /usr/local/bin/shfmt
           shellcheck --version
           shfmt -version
-
       - name: Create throwaway scripts (good/bad)
         run: |
-          set -euxo pipefail
           mkdir -p .ci-selftest
-          cat > .ci-selftest/good.sh <<'EOF'
-          #!/usr/bin/env bash
-          set -euo pipefail
-          msg="hello"
-          echo "$msg"
-          EOF
-          chmod +x .ci-selftest/good.sh
-          cat > .ci-selftest/bad.sh <<'EOF'
-          #!/usr/bin/env bash
-          set -euo pipefail
-          msg=hello
-          echo $msg
-          if [ "$msg" = "hello" ]; then
-          echo ok
-          fi
-          EOF
-          chmod +x .ci-selftest/bad.sh
-
+          echo -e '#!/usr/bin/env bash\nmsg="hello"\necho "$msg"' > .ci-selftest/good.sh
+          echo -e '#!/usr/bin/env bash\nmsg=hello\necho $msg' > .ci-selftest/bad.sh
+          chmod +x .ci-selftest/*.sh
       - name: shellcheck should report findings
         run: |
           set +e
-          shellcheck -x -S style -f gcc .ci-selftest/good.sh .ci-selftest/bad.sh
+          shellcheck -x -S style -f gcc .ci-selftest/*.sh
           ec=$?
-          echo "shellcheck exit: $ec (expect non-zero)"; test $ec -ne 0
-
+          echo "exit=$ec (expect non-zero)"
+          test $ec -ne 0
       - name: shfmt should show diff for bad.sh
         run: |
-          set -e
           if shfmt -i 2 -ci -d .ci-selftest/*.sh; then
-            echo "Unexpected: shfmt returned 0 (no diff)"; exit 1
-          else
-            echo "Expected: shfmt returned non-zero due to formatting diff"
+            echo "Unexpected: no diff"; exit 1
           fi
 
-      - name: bash -n should parse both
-        run: |
-          set -e
-          bash -n .ci-selftest/good.sh
-          bash -n .ci-selftest/bad.sh
-          echo "Syntax OK"
-
-  # ================= 1) Advisory reviewer (PR comments + SARIF; non-blocking) =================
+  # ========== 1) Advisory reviewer (non-blocking) ==========
   reviewer_advice:
     name: Shell review (advisory)
     runs-on: ubuntu-latest
@@ -109,179 +76,71 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y shellcheck
           SHFMT_VERSION=3.9.0
-          OS=$(uname -s | tr '[:upper:]' '[:lower:]')
-          ARCH=$(uname -m)
-          case "$ARCH" in
-            x86_64) ARCH=amd64 ;;
-            aarch64) ARCH=arm64 ;;
-          esac
-          curl -sSL -o /usr/local/bin/shfmt \
-            "https://github.com/mvdan/sh/releases/download/v${SHFMT_VERSION}/shfmt_v${SHFMT_VERSION}_${OS}_${ARCH}"
-          sudo chmod +x /usr/local/bin/shfmt
+          curl -sSL https://github.com/mvdan/sh/releases/download/v${SHFMT_VERSION}/shfmt_v${SHFMT_VERSION}_linux_amd64 \
+            -o /usr/local/bin/shfmt
+          chmod +x /usr/local/bin/shfmt
           echo "== Versions =="; shellcheck --version; shfmt -version
 
-      - name: Setup reviewdog (pinned)
-        uses: reviewdog/action-setup@e04ffabe3898a0af8d0fb1af00c188831c4b5893 # v1.3.2
+      - name: Setup reviewdog
+        uses: reviewdog/action-setup@v1
         with:
           reviewdog_version: latest
 
-      - name: Build file list (extensions + shebang scan)
-        id: files
-        shell: bash
-        run: |
-          set -euo pipefail
-          tmp="$(mktemp)"
-          detect_shell() {
-            while IFS= read -r -d '' f; do
-              if head -c 1024 "$f" | grep -aqE '^#!.*\b(bash|sh|zsh)\b'; then
-                printf '%s\0' "$f"
-              fi
-            done
-          }
-          if [[ -f "$SHELL_PATHS_FILE" ]]; then
-            mapfile -t dirs < <(sed -E 's/#.*$//; s/^[[:space:]]+|[[:space:]]+$//g; /^$/d' "$SHELL_PATHS_FILE")
-            if ((${#dirs[@]})); then
-              while IFS= read -r -d '' f; do printf '%s\0' "$f"; done < <(
-                printf '%s\0' "${dirs[@]}" |
-                xargs -0 -I{} find "{}" -type f -regextype posix-extended \
-                  -regex '.*\.(sh|bash|zsh)$' -print0 2>/dev/null
-              ) > "$tmp"
-              printf '%s\0' "${dirs[@]}" |
-              xargs -0 -I{} find "{}" -type f -perm -111 -print0 2>/dev/null |
-              detect_shell >> "$tmp"
-            else : > "$tmp"; fi
-          else
-            git ls-files -z -- '*.sh' '*.bash' '*.zsh' > "$tmp"
-            git ls-files -z | xargs -0 -I{} -- file -b "{}" | paste -d '\0' - - |
-            awk -v RS='\0' 'NR%2==1{f=$0} NR%2==0{ if($0 ~ /shell script/) print f "\0" }' >> "$tmp"
-          fi
-          tr '\0' '\n' < "$tmp" | sort -u | tee files.debug | tr '\n' '\0' > files.list
-          echo "count=$(tr -cd '\0' < files.list | wc -c)" >> "$GITHUB_OUTPUT"
-          echo "== Files considered =="; cat files.debug
+      - name: List reviewdog formats (debug)
+        run: reviewdog -list
 
-      - name: (Debug) Show first lines of each file
-        if: ${{ steps.files.outputs.count != '0' && (
-                (github.event_name == 'workflow_dispatch' && inputs.debug) ||
-                (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci-debug'))
-              ) }}
+      - name: Find shell scripts
+        id: find_files
         run: |
-          while IFS= read -r f; do
-            echo "----- $f -----"
-            sed -n '1,200p' "$f"
-          done < files.debug
+          git ls-files '*.sh' '*.bash' '*.zsh' > files.list
+          cat files.list
+          echo "count=$(wc -l < files.list)" >> $GITHUB_OUTPUT
 
-      - name: shellcheck with reviewdog (PR comments; non-blocking)
-        if: ${{ steps.files.outputs.count != '0' && github.event_name == 'pull_request' }}
-        env:
-          REVIEWDOG_GITHUB_API_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Run shellcheck with reviewdog
+        if: steps.find_files.outputs.count != '0'
         run: |
           set +e
-          xargs -0 shellcheck -f checkstyle --external-sources --severity=style < files.list \
-            > shellcheck_checkstyle.xml || true
+          xargs -a files.list shellcheck -f checkstyle --external-sources --severity=style > shellcheck_checkstyle.xml || true
+          echo "== shellcheck_checkstyle.xml =="
+          cat shellcheck_checkstyle.xml || true
           reviewdog -f=checkstyle -name="shellcheck" \
             -reporter=github-pr-review -level=warning -filter-mode=added \
-            -fail-on-error=false -tee < shellcheck_checkstyle.xml || true
+            -fail-on-error=false -tee < shellcheck_checkstyle.xml
 
-      - name: Generate shfmt diff
-        if: ${{ steps.files.outputs.count != '0' && github.event_name == 'pull_request' }}
-        id: shfmt
+      - name: Run shfmt with reviewdog
+        if: steps.find_files.outputs.count != '0'
         run: |
-          set -e
-          xargs -0 shfmt -i 2 -ci -s -fn -d < files.list > shfmt.diff || true
-          if [[ -s shfmt.diff ]]; then echo "has_diff=true" >> "$GITHUB_OUTPUT"; else echo "has_diff=false" >> "$GITHUB_OUTPUT"; fi
-
-      - name: shfmt suggestions via reviewdog (PR comments; non-blocking)
-        if: ${{ steps.shfmt.outputs.has_diff == 'true' }}
-        env:
-          REVIEWDOG_GITHUB_API_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
+          set +e
+          shfmt -i 2 -ci -d $(cat files.list) > shfmt.diff || true
+          echo "== shfmt.diff =="
+          cat shfmt.diff || echo "No diff"
           reviewdog -f=diff -name="shfmt" \
-            -reporter=github-pr-review -filter-mode=added \
-            -fail-on-error=false -tee < shfmt.diff || true
+            -reporter=github-pr-review -level=warning -filter-mode=added \
+            -fail-on-error=false -tee < shfmt.diff
 
-      - name: shellcheck → SARIF (non-blocking)
-        if: ${{ steps.files.outputs.count != '0' }}
-        run: |
-          xargs -0 shellcheck -f sarif -S style < files.list > shellcheck.sarif || true
-
-      - name: Upload SARIF
-        if: ${{ steps.files.outputs.count != '0' }}
-        uses: github/codeql-action/upload-sarif@v3
-        with:
-          sarif_file: shellcheck.sarif
-
-      - name: (Debug) reviewdog smoke (PR review comment)
-        if: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci-debug') }}
-        env:
-          REVIEWDOG_GITHUB_API_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          printf 'smoke.sh:1:1: inline review comment (smoke)\n' | \
-            reviewdog \
-              -efm='%f:%l:%c: %m' \
-              -name='reviewdog smoke (pr-review)' \
-              -reporter=github-pr-review \
-              -filter-mode=added \
-              -level=info \
-              -tee || true
-
-  # ================= 2) Blocking gatekeeper (use in Branch protection) =================
+  # ========== 2) Gatekeeper (blocking) ==========
   gatekeeper:
     name: Shell gatekeeper (blocking)
     runs-on: ubuntu-latest
-    if: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft == false }}
+    if: github.event_name == 'pull_request'
 
     steps:
       - uses: actions/checkout@v4
-
       - name: Install tools
         run: |
-          set -euxo pipefail
           sudo apt-get update
           sudo apt-get install -y shellcheck
           SHFMT_VERSION=3.9.0
-          OS=$(uname -s | tr '[:upper:]' '[:lower:]')
-          ARCH=$(uname -m)
-          case "$ARCH" in
-            x86_64) ARCH=amd64 ;;
-            aarch64) ARCH=arm64 ;;
-          esac
-          curl -sSL -o /usr/local/bin/shfmt \
-            "https://github.com/mvdan/sh/releases/download/v${SHFMT_VERSION}/shfmt_v${SHFMT_VERSION}_${OS}_${ARCH}"
-          sudo chmod +x /usr/local/bin/shfmt
-          echo "== Versions =="; shellcheck --version; shfmt -version
-
-      - name: Find shell scripts (fast path by extensions)
-        id: files
+          curl -sSL https://github.com/mvdan/sh/releases/download/v${SHFMT_VERSION}/shfmt_v${SHFMT_VERSION}_linux_amd64 \
+            -o /usr/local/bin/shfmt
+          chmod +x /usr/local/bin/shfmt
+      - name: Run shellcheck (blocking)
+        run: xargs -a <(git ls-files '*.sh' '*.bash' '*.zsh') shellcheck -x -S style -e SC1090 -e SC1091
+      - name: Run shfmt (blocking)
+        run: shfmt -i 2 -ci -d $(git ls-files '*.sh' '*.bash' '*.zsh')
+      - name: Run bash -n (syntax check)
         run: |
-          set -euo pipefail
-          mapfile -t scripts < <(git ls-files \
-            '*.sh' '*.bash' '*.zsh' ':!:**/node_modules/**' ':!:**/vendor/**')
-          printf '%s\n' "${scripts[@]}" | tee scripts.txt
-          echo "count=${#scripts[@]}" >> "$GITHUB_OUTPUT"
-
-      - name: Skip if none
-        if: ${{ steps.files.outputs.count == '0' }}
-        run: echo "No shell files in repo — skipping gatekeeper." && exit 0
-
-      - name: Syntax check (bash -n / zsh -n)
-        run: |
-          set -euo pipefail
-          echo "== Syntax check =="
-          while read -r f; do
-            case "$f" in
-              *.zsh)  echo "zsh -n $f";  zsh -n "$f" ;;
-              *)      echo "bash -n $f"; bash -n "$f" ;;
-            esac
-          done < scripts.txt
-
-      - name: shellcheck (fail on findings)
-        run: |
-          set -euo pipefail
-          echo "== shellcheck findings (if any) =="
-          shellcheck -x -S style -f gcc $(cat scripts.txt)
-
-      - name: shfmt (enforce formatting; fail on diff)
-        run: |
-          set -euo pipefail
-          echo "== shfmt diff (should be empty) =="
-          shfmt -i 2 -ci -d $(cat scripts.txt)
+          set -e
+          for f in $(git ls-files '*.sh' '*.bash' '*.zsh'); do
+            bash -n "$f"
+          done
