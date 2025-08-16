@@ -75,7 +75,7 @@ jobs:
       - name: shellcheck should report findings
         run: |
           set +e
-          shellcheck -x -S style -f gcc .ci-selftest/good.sh .ci-selftest/bad.sh
+          shellcheck -x -S style -f gcc .ci-selftest/*.sh
           ec=$?
           echo "shellcheck exit: $ec (expect non-zero)"; test $ec -ne 0
 
@@ -120,8 +120,8 @@ jobs:
           sudo chmod +x /usr/local/bin/shfmt
           echo "== Versions =="; shellcheck --version; shfmt -version
 
-      - name: Setup reviewdog (pinned)
-        uses: reviewdog/action-setup@e04ffabe3898a0af8d0fb1af00c188831c4b5893 # v1.3.2
+      - name: Setup reviewdog
+        uses: reviewdog/action-setup@v1
         with:
           reviewdog_version: latest
 
@@ -158,17 +158,6 @@ jobs:
           tr '\0' '\n' < "$tmp" | sort -u | tee files.debug | tr '\n' '\0' > files.list
           echo "count=$(tr -cd '\0' < files.list | wc -c)" >> "$GITHUB_OUTPUT"
           echo "== Files considered =="; cat files.debug
-
-      - name: (Debug) Show first lines of each file
-        if: ${{ steps.files.outputs.count != '0' && (
-                (github.event_name == 'workflow_dispatch' && inputs.debug) ||
-                (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci-debug'))
-              ) }}
-        run: |
-          while IFS= read -r f; do
-            echo "----- $f -----"
-            sed -n '1,200p' "$f"
-          done < files.debug
 
       - name: shellcheck with reviewdog (PR comments; non-blocking)
         if: ${{ steps.files.outputs.count != '0' && github.event_name == 'pull_request' }}
