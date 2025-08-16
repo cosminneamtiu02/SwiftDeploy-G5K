@@ -125,75 +125,39 @@ jobs:
         with:
           reviewdog_version: latest
 
-      - name: (Debug) reviewdog smoke check (commit check)
-        if: ${{ (github.event_name == 'workflow_dispatch' && inputs.debug)
-              || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci-debug')) }}
-        env:
-          REVIEWDOG_GITHUB_API_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          printf 'smoke.sh:1:1: reviewdog is able to post (smoke)\n' | \
-            reviewdog \
-              -efm='%f:%l:%c: %m' \
-              -name='reviewdog smoke' \
-              -reporter=github-check \
-              -level=info \
-              -tee
-
-      - name: (Debug) reviewdog smoke (PR review comment)
-        if: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci-debug') }}
-        env:
-          REVIEWDOG_GITHUB_API_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          printf 'smoke.sh:1:1: inline review comment (smoke)\n' | \
-            reviewdog \
-              -efm='%f:%l:%c: %m' \
-              -name='reviewdog smoke (pr-review)' \
-              -reporter=github-pr-review \
-              -filter-mode=diff \
-              -level=info \
-              -tee
-
       - name: Build file list (extensions + shebang scan)
         id: files
         shell: bash
         run: |
           set -euo pipefail
-
-          if [[ -f "$SHELL_PATHS_FILE" ]]; then
-            mapfile -t SCAN_DIRS < <(sed -E 's/#.*$//; s/^[[:space:]]+|[[:space:]]+$//g; /^$/d' "$SHELL_PATHS_FILE")
-            if ((${#SCAN_DIRS[@]} == 0)); then SCAN_DIRS=(.); fi
-          else
-            SCAN_DIRS=(.)
-          fi
-
-          find_ext() {
-            printf '%s\0' "${SCAN_DIRS[@]}" | \
-            xargs -0 -I{} find "{}" \
-              -type d \( -name node_modules -o -name vendor \) -prune -o \
-              -type f \( -name '*.sh' -o -name '*.bash' -o -name '*.zsh' \) -print0 2>/dev/null
-          }
-          find_exec_shebang() {
-            printf '%s\0' "${SCAN_DIRS[@]}" | \
-            xargs -0 -I{} find "{}" \
-              -type d \( -name node_modules -o -name vendor \) -prune -o \
-              -type f -perm -111 -print0 2>/dev/null | \
+          tmp="$(mktemp)"
+          detect_shell() {
             while IFS= read -r -d '' f; do
               if head -c 1024 "$f" | grep -aqE '^#!.*\b(bash|sh|zsh)\b'; then
                 printf '%s\0' "$f"
               fi
             done
           }
-
-          tmp="$(mktemp)"
-          { find_ext; find_exec_shebang; } > "$tmp" || true
-
+          if [[ -f "$SHELL_PATHS_FILE" ]]; then
+            mapfile -t dirs < <(sed -E 's/#.*$//; s/^[[:space:]]+|[[:space:]]+$//g; /^$/d' "$SHELL_PATHS_FILE")
+            if ((${#dirs[@]})); then
+              while IFS= read -r -d '' f; do printf '%s\0' "$f"; done < <(
+                printf '%s\0' "${dirs[@]}" |
+                xargs -0 -I{} find "{}" -type f -regextype posix-extended \
+                  -regex '.*\.(sh|bash|zsh)$' -print0 2>/dev/null
+              ) > "$tmp"
+              printf '%s\0' "${dirs[@]}" |
+              xargs -0 -I{} find "{}" -type f -perm -111 -print0 2>/dev/null |
+              detect_shell >> "$tmp"
+            else : > "$tmp"; fi
+          else
+            git ls-files -z -- '*.sh' '*.bash' '*.zsh' > "$tmp"
+            git ls-files -z | xargs -0 -I{} -- file -b "{}" | paste -d '\0' - - |
+            awk -v RS='\0' 'NR%2==1{f=$0} NR%2==0{ if($0 ~ /shell script/) print f "\0" }' >> "$tmp"
+          fi
           tr '\0' '\n' < "$tmp" | sort -u | tee files.debug | tr '\n' '\0' > files.list
-
-          count=$(tr -cd '\0' < files.list | wc -c | tr -d ' ')
-          echo "count=$count" >> "$GITHUB_OUTPUT"
-
-          echo "== Files considered =="
-          cat files.debug
+          echo "count=$(tr -cd '\0' < files.list | wc -c)" >> "$GITHUB_OUTPUT"
+          echo "== Files considered =="; cat files.debug
 
       - name: (Debug) Show first lines of each file
         if: ${{ steps.files.outputs.count != '0' && (
@@ -215,8 +179,8 @@ jobs:
           xargs -0 shellcheck -f checkstyle --external-sources --severity=style < files.list \
             > shellcheck_checkstyle.xml || true
           reviewdog -f=checkstyle -name="shellcheck" \
-            -reporter=github-pr-review -level=warning -filter-mode=diff \
-            -fail-on-error=false -tee < shellcheck_checkstyle.xml
+            -reporter=github-pr-review -level=warning -filter-mode=added \
+            -fail-on-error=false -tee < shellcheck_checkstyle.xml || true
 
       - name: Generate shfmt diff
         if: ${{ steps.files.outputs.count != '0' && github.event_name == 'pull_request' }}
@@ -232,8 +196,8 @@ jobs:
           REVIEWDOG_GITHUB_API_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           reviewdog -f=diff -name="shfmt" \
-            -reporter=github-pr-review -filter-mode=diff \
-            -fail-on-error=false -tee < shfmt.diff
+            -reporter=github-pr-review -filter-mode=added \
+            -fail-on-error=false -tee < shfmt.diff || true
 
       - name: shellcheck → SARIF (non-blocking)
         if: ${{ steps.files.outputs.count != '0' }}
@@ -245,6 +209,20 @@ jobs:
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: shellcheck.sarif
+
+      - name: (Debug) reviewdog smoke (PR review comment)
+        if: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci-debug') }}
+        env:
+          REVIEWDOG_GITHUB_API_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          printf 'smoke.sh:1:1: inline review comment (smoke)\n' | \
+            reviewdog \
+              -efm='%f:%l:%c: %m' \
+              -name='reviewdog smoke (pr-review)' \
+              -reporter=github-pr-review \
+              -filter-mode=added \
+              -level=info \
+              -tee || true
 
   # ================= 2) Blocking gatekeeper (use in Branch protection) =================
   gatekeeper:
@@ -300,7 +278,7 @@ jobs:
         run: |
           set -euo pipefail
           echo "== shellcheck findings (if any) =="
-          xargs -a scripts.txt shellcheck -x -S style -f gcc
+          shellcheck -x -S style -f gcc $(cat scripts.txt)
 
       - name: shfmt (enforce formatting; fail on diff)
         run: |
