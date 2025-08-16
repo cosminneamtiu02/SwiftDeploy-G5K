@@ -130,34 +130,41 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          tmp="$(mktemp)"
-          detect_shell() {
+
+          if [[ -f "$SHELL_PATHS_FILE" ]]; then
+            mapfile -t SCAN_DIRS < <(sed -E 's/#.*$//; s/^[[:space:]]+|[[:space:]]+$//g; /^$/d' "$SHELL_PATHS_FILE")
+            if ((${#SCAN_DIRS[@]} == 0)); then SCAN_DIRS=(.); fi
+          else
+            SCAN_DIRS=(.)
+          fi
+
+          find_ext() {
+            printf '%s\0' "${SCAN_DIRS[@]}" | \
+            xargs -0 -I{} find "{}" \
+              -type d \( -name node_modules -o -name vendor \) -prune -o \
+              -type f \( -name '*.sh' -o -name '*.bash' -o -name '*.zsh' \) -print0 2>/dev/null
+          }
+          find_exec_shebang() {
+            printf '%s\0' "${SCAN_DIRS[@]}" | \
+            xargs -0 -I{} find "{}" \
+              -type d \( -name node_modules -o -name vendor \) -prune -o \
+              -type f -perm -111 -print0 2>/dev/null | \
             while IFS= read -r -d '' f; do
               if head -c 1024 "$f" | grep -aqE '^#!.*\b(bash|sh|zsh)\b'; then
                 printf '%s\0' "$f"
               fi
             done
           }
-          if [[ -f "$SHELL_PATHS_FILE" ]]; then
-            mapfile -t dirs < <(sed -E 's/#.*$//; s/^[[:space:]]+|[[:space:]]+$//g; /^$/d' "$SHELL_PATHS_FILE")
-            if ((${#dirs[@]})); then
-              while IFS= read -r -d '' f; do printf '%s\0' "$f"; done < <(
-                printf '%s\0' "${dirs[@]}" |
-                xargs -0 -I{} find "{}" -type f -regextype posix-extended \
-                  -regex '.*\.(sh|bash|zsh)$' -print0 2>/dev/null
-              ) > "$tmp"
-              printf '%s\0' "${dirs[@]}" |
-              xargs -0 -I{} find "{}" -type f -perm -111 -print0 2>/dev/null |
-              detect_shell >> "$tmp"
-            else : > "$tmp"; fi
-          else
-            git ls-files -z -- '*.sh' '*.bash' '*.zsh' > "$tmp"
-            git ls-files -z | xargs -0 -I{} -- file -b "{}" | paste -d '\0' - - |
-            awk -v RS='\0' 'NR%2==1{f=$0} NR%2==0{ if($0 ~ /shell script/) print f "\0" }' >> "$tmp"
-          fi
+
+          tmp="$(mktemp)"
+          { find_ext; find_exec_shebang; } > "$tmp" || true
+
           tr '\0' '\n' < "$tmp" | sort -u | tee files.debug | tr '\n' '\0' > files.list
-          echo "count=$(tr -cd '\0' < files.list | wc -c)" >> "$GITHUB_OUTPUT"
-          echo "== Files considered =="; cat files.debug
+          count=$(tr -cd '\0' < files.list | wc -c | tr -d ' ')
+          echo "count=$count" >> "$GITHUB_OUTPUT"
+
+          echo "== Files considered =="
+          cat files.debug
 
       - name: shellcheck with reviewdog (PR comments; non-blocking)
         if: ${{ steps.files.outputs.count != '0' && github.event_name == 'pull_request' }}
@@ -188,10 +195,24 @@ jobs:
             -reporter=github-pr-review -filter-mode=added \
             -fail-on-error=false -tee < shfmt.diff || true
 
+      # ---- SARIF with guard (prevents "Invalid SARIF" on empty/truncated output)
       - name: shellcheck → SARIF (non-blocking)
         if: ${{ steps.files.outputs.count != '0' }}
         run: |
+          set -e
           xargs -0 shellcheck -f sarif -S style < files.list > shellcheck.sarif || true
+          if [[ ! -s shellcheck.sarif ]]; then
+            echo "No SARIF output generated, creating empty stub."
+            echo '{"version":"2.1.0","runs":[]}' > shellcheck.sarif
+          fi
+
+      - name: Debug SARIF file (size & head)
+        if: ${{ steps.files.outputs.count != '0' }}
+        run: |
+          echo "== File size =="
+          stat -c '%s bytes' shellcheck.sarif || true
+          echo "== Head =="
+          head -n 40 shellcheck.sarif || true
 
       - name: Upload SARIF
         if: ${{ steps.files.outputs.count != '0' }}
@@ -199,6 +220,7 @@ jobs:
         with:
           sarif_file: shellcheck.sarif
 
+      # Optional: confirm reviewdog can post (label PR with `ci-debug`)
       - name: (Debug) reviewdog smoke (PR review comment)
         if: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci-debug') }}
         env:
