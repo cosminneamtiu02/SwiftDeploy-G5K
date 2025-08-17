@@ -1,4 +1,7 @@
 # grid5k-MLRW
+
+[![Shell Quality](https://github.com/cosminneamtiu02/grid5k-MLRW/actions/workflows/shell-quality.yml/badge.svg)](https://github.com/cosminneamtiu02/grid5k-MLRW/actions/workflows/shell-quality.yml)
+
 This repository provides an infrastructure for Grid'5000, supporting and accelerating multiple parallel and synchronous machine learning trainings. It also includes tools for building images and offers a standardized approach for collecting results on the platform.
 
 
@@ -20,3 +23,9 @@ This repository uses [pre-commit](https://pre-commit.com/) to run **ShellCheck**
    pipx install pre-commit
    # or (macOS with Homebrew)
    brew install pre-commit
+
+
+### **Before a big PR please use:**
+
+```bash
+   pre-commit run --all-files

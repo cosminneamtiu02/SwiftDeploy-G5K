@@ -4,7 +4,7 @@ repos:
     hooks:
       - id: shellcheck
         args: [--external-sources, --severity=style]
-        additional_dependencies: []   # uses prebuilt shellcheck
+        additional_dependencies: []
 
   - repo: https://github.com/jumanjihouse/pre-commit-hooks
     rev: 3.0.0
