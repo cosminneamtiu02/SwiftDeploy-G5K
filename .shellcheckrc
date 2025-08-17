@@ -1,4 +1,4 @@
 # Enable most rules; ignore ones that are commonly noisy in CI
 enable=all
-exclude=SC1090,SC1091      # sourcing files that may not exist in CI
+#exclude=SC1090,SC1091      # sourcing files that may not exist in CI
 shell=bash                  # default; still checks POSIX sh where applicable
