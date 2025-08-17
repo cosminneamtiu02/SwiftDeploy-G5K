@@ -271,7 +271,7 @@ jobs:
 
   # ================= 2) Blocking gatekeeper (use in Branch protection) =================
   gatekeeper:
-    name: Shell gatekeeper (blocking)
+    name: Shell gatekeeper
     runs-on: ubuntu-latest
     if: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft == false }}
 
