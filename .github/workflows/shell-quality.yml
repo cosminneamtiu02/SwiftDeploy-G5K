@@ -200,10 +200,7 @@ jobs:
         if: ${{ steps.files.outputs.count != '0' }}
         run: |
           set -e
-          # Try to produce SARIF from shellcheck
           xargs -0 shellcheck -f sarif -S style < files.list > shellcheck.sarif || true
-
-          # If the SARIF is missing or suspiciously tiny, create a minimal valid one
           if [[ ! -s shellcheck.sarif ]] || [[ $(wc -c < shellcheck.sarif) -lt 40 ]]; then
             echo "Creating minimal valid SARIF stub (no results)."
             cat > shellcheck.sarif <<'JSON'
@@ -269,11 +266,12 @@ jobs:
               -level=info \
               -tee || true
 
-  # ================= 2) Blocking gatekeeper (use in Branch protection) =================
+  # ================= 2) Blocking gatekeeper (use in Branch protection / Rulesets) =================
   gatekeeper:
-    name: Shell gatekeeper
+    name: Shell gatekeeper (blocking)
     runs-on: ubuntu-latest
-    if: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft == false }}
+    # Run on pushes and on non-draft PRs
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
 
     steps:
       - uses: actions/checkout@v4
@@ -304,11 +302,13 @@ jobs:
           printf '%s\n' "${scripts[@]}" | tee scripts.txt
           echo "count=${#scripts[@]}" >> "$GITHUB_OUTPUT"
 
-      - name: Skip if none
+      - name: No shell files — nothing to check (mark success)
         if: ${{ steps.files.outputs.count == '0' }}
-        run: echo "No shell files in repo — skipping gatekeeper." && exit 0
+        run: |
+          echo "No shell files found — gatekeeper passing (nothing to validate)."
 
       - name: Syntax check (bash -n / zsh -n)
+        if: ${{ steps.files.outputs.count != '0' }}
         run: |
           set -euo pipefail
           echo "== Syntax check =="
@@ -320,12 +320,14 @@ jobs:
           done < scripts.txt
 
       - name: shellcheck (fail on findings)
+        if: ${{ steps.files.outputs.count != '0' }}
         run: |
           set -euo pipefail
           echo "== shellcheck findings (if any) =="
           shellcheck -x -S style -f gcc $(cat scripts.txt)
 
       - name: shfmt (enforce formatting; fail on diff)
+        if: ${{ steps.files.outputs.count != '0' }}
         run: |
           set -euo pipefail
           echo "== shfmt diff (should be empty) =="
