@@ -1,19 +1,49 @@
----
 name: "✨ Feature request"
-about: Suggest an idea or improvement
+description: Suggest an idea or improvement
 title: "feat: <short description>"
-labels: ["enhancement"]
-assignees: ["cosminneamtiu02"]
----
+labels: ["feature", "not implemented"]
+assignees:
+  - cosminneamtiu02
 
-## Problem / Motivation
-What problem does this solve? Who benefits?
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem / Motivation
+      description: What problem does this solve? Who benefits?
+    validations:
+      required: true
 
-## Proposed Solution
-Describe the feature or change you’d like to see.
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed Solution
+      description: Describe the feature or change you’d like to see.
+    validations:
+      required: true
 
-## Alternatives Considered
-Any alternative solutions or workarounds you’ve tried.
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered
+      description: Any alternative solutions or workarounds you’ve tried.
 
-## Additional Context
-Links, references, mockups, or examples.
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional Context
+      description: Links, references, mockups, or examples.
+
+  - type: dropdown
+    id: status
+    attributes:
+      label: Feature Status
+      description: Track the current status of this feature request.
+      options:
+        - not implemented
+        - in progress
+        - blocked
+        - requires info
+        - done
+    validations:
+      required: false
