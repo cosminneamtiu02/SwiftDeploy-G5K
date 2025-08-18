@@ -110,7 +110,6 @@ cd $HOME/work/$G5K_SITE/grid5k-MLRW
 
 We welcome contributions! 🎉  
 
-Please read the [Contributing Guide](./CONTRIBUTING.md) for setup instructions, coding standards, and our pull request workflow.
-
 Please message me on LinkedIn, so I can add you to the project. Link in my bio to LinkedIn.
 
+Please read the [Contributing Guide](./CONTRIBUTING.md) for setup instructions, coding standards, and our pull request workflow.
