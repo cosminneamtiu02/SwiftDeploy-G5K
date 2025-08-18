@@ -1,9 +1,7 @@
 # grid5k-MLRW
 
 [![Shell Quality](https://github.com/cosminneamtiu02/grid5k-MLRW/actions/workflows/shell-quality.yml/badge.svg)](https://github.com/cosminneamtiu02/grid5k-MLRW/actions/workflows/shell-quality.yml)
-
 [![pre-commit.ci status](https://img.shields.io/endpoint?url=https://badge.pre-commit.ci/https://github.com/cosminneamtiu02/grid5k-MLRW/main)](https://pre-commit.ci/)
-
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 This repository provides an infrastructure for Grid'5000, supporting and accelerating multiple parallel and
