@@ -1,2 +1,23 @@
-*.sh  @cosminneamtiu02
-*.bash @cosminneamtiu02
+#Project adiministration rules
+
+README.md @cosminneamtiu02
+CONTRIBUTING.md @cosminneamtiu02
+LICENSE @cosminneamtiu02
+
+.editorconfig @cosminneamtiu02
+.gitignore @cosminneamtiu02
+.markdownlint.json @cosminneamtiu02
+.pre-commit-config.yaml @cosminneamtiu02
+.shellcheckrc @cosminneamtiu02
+.shell_paths @cosminneamtiu02
+
+.github/CODEOWNERS @cosminneamtiu02
+.github/labels.yml @cosminneamtiu02
+.github/pull_request_template.md @cosminneamtiu02
+
+.github/ISSUE_TEMPLATE/bug_report.yml @cosminneamtiu02
+.github/ISSUE_TEMPLATE/config.yml @cosminneamtiu02
+.github/ISSUE_TEMPLATE/feature_request.yml @cosminneamtiu02
+
+.github/workflows/shell-quality.yml @cosminneamtiu02
+.github/workflows/sync-labels.yml @cosminneamtiu02

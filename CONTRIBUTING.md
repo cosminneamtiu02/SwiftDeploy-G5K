@@ -1,7 +1,7 @@
 # Contributing Guide
 
 [![Shell Quality](https://github.com/cosminneamtiu02/grid5k-MLRW/actions/workflows/shell-quality.yml/badge.svg)](https://github.com/cosminneamtiu02/grid5k-MLRW/actions/workflows/shell-quality.yml)
-[![pre-commit.ci status](https://img.shields.io/endpoint?url=https://badge.pre-commit.ci/https://github.com/cosminneamtiu02/grid5k-MLRW/main)](https://pre-commit.ci/)
+[![pre-commit](https://img.shields.io/badge/pre--commit-enabled-brightgreen?logo=pre-commit&logoColor=white)](https://github.com/pre-commit/pre-commit)
 
 Thanks for contributing! 🎉
 
