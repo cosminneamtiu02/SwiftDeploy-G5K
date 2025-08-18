@@ -4,7 +4,7 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review, labeled, unlabeled]
   push:
-    branches: [ main ]
+    branches: [main]
   workflow_dispatch:
     inputs:
       debug:
@@ -27,7 +27,7 @@ jobs:
     name: Sanity & self-test
     runs-on: ubuntu-latest
     if: ${{ (github.event_name == 'workflow_dispatch' && inputs.debug)
-          || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci-debug')) }}
+      || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci-debug')) }}
 
     steps:
       - uses: actions/checkout@v4

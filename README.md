@@ -6,9 +6,9 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-This repository provides an infrastructure for Grid'5000, supporting and accelerating multiple parallel and synchronous machine learning trainings. It also includes tools for building images and offers a standardized approach for collecting results on the platform.
-
-
+This repository provides an infrastructure for Grid'5000, supporting and accelerating multiple parallel and
+synchronous machine learning trainings. It also includes tools for building images and offers a standardized
+approach for collecting results on the platform.
 
 ## Grid'5000: Setup & Update Guide
 
@@ -16,7 +16,7 @@ Follow these steps to get this project onto a Grid'5000 Frontend (FE) and keep i
 
 ### 1) Prerequisites
 
-- You have a Grid'5000 account and your SSH key is registered.  
+- You have a Grid'5000 account and your SSH key is registered.
 - Replace `YOUR_LOGIN` and `YOUR_SITE` with your own values.
 
 ### 2) Log in to a Frontend (FE)
@@ -105,11 +105,21 @@ cd $HOME/work/$G5K_SITE/grid5k-MLRW
 # then clone/update as above
 ```
 
-
 ## Contributing
 
-We welcome contributions! 🎉  
-
-Please message me on LinkedIn, so I can add you to the project. Link in my bio to LinkedIn.
+We welcome contributions! 🎉
 
 Please read the [Contributing Guide](./CONTRIBUTING.md) for setup instructions, coding standards, and our pull request workflow.
+
+**Quick start for contributors:**
+
+```bash
+# Install pre-commit for automatic code quality checks
+pip install pre-commit
+pre-commit install
+
+# Test your setup
+pre-commit run --all-files
+```
+
+Please message me on LinkedIn, so I can add you to the project. Link in my bio to LinkedIn.

@@ -1,72 +1,191 @@
 # Contributing Guide
 
-Thanks for contributing!
-This project enforces strict shell script quality with pre-commit and GitHub Actions.
+[![Shell Quality](https://github.com/cosminneamtiu02/grid5k-MLRW/actions/workflows/shell-quality.yml/badge.svg)](https://github.com/cosminneamtiu02/grid5k-MLRW/actions/workflows/shell-quality.yml)
+
+[![pre-commit.ci status](https://img.shields.io/endpoint?url=https://badge.pre-commit.ci/https://github.com/cosminneamtiu02/grid5k-MLRW/main)](https://pre-commit.ci/)
+
+Thanks for contributing! 🎉
+
+This project enforces strict code quality standards using **pre-commit hooks** and **GitHub Actions**.
 Following this guide will help you get set up and avoid CI failures.
+
+## What is Pre-commit?
+
+**Pre-commit** automatically runs quality checks on your code **before** each commit, ensuring:
+
+- **Code formatting** is consistent (YAML, Markdown)
+- **No trailing whitespace** or missing newlines
+- **Shell scripts** are properly formatted and linted
+- **YAML files** are valid (workflows, configs)
+- **Markdown** follows style guidelines
+- **No large files** or merge conflicts
+
+If any check fails, the commit is blocked until you fix the issues. Many problems are **auto-fixed** for you!
 
 ---
 
 ## Local Setup
 
-1) Clone the repository
+### 1) Clone the repository
 
-    git clone https://github.com/cosminneamtiu02/grid5k-MLRW.git
-    cd grid5k-MLRW
+```bash
+git clone https://github.com/cosminneamtiu02/grid5k-MLRW.git
+cd grid5k-MLRW
+```
 
-2) Install pre-commit (choose one)
+### 2) Install pre-commit (choose one)
 
-    pip install pre-commit
+```bash
+# Using pip
+pip install pre-commit
 
-    pipx install pre-commit
+# Using pipx (recommended)
+pipx install pre-commit
 
-    brew install pre-commit
+# Using homebrew (macOS)
+brew install pre-commit
 
-3) Enable pre-commit hooks
+# Using apt (Ubuntu/Debian)
+sudo apt install pre-commit
+```
 
-    pre-commit install
+### 3) Enable pre-commit hooks
 
-4) Run all checks manually (optional)
+```bash
+pre-commit install
+```
 
-    pre-commit run --all-files
+### 4) Test the setup (optional but recommended)
 
-The commands above ensure ShellCheck and shfmt run locally on every commit.
+```bash
+pre-commit run --all-files
+```
+
+This will run all quality checks on your entire codebase and auto-fix many issues.
 
 ---
 
 ## Development Workflow
 
-1) Make changes
-   - Edit or add shell scripts.
-   - Commit normally. If hooks fail, fix issues and commit again.
+### 1) Make changes
 
-    git commit -m "your message"
+Edit files as needed. Pre-commit will automatically check:
 
-2) Push and open a Pull Request to `main`
+- **Markdown files** (`.md`) - formatting and style
+- **YAML files** (`.yml`, `.yaml`) - syntax and formatting
+- **Shell scripts** (`.sh`, `.bash`) - shellcheck linting and shfmt formatting
+- **All files** - trailing whitespace, end-of-file newlines, large files
 
-    git push origin <your-branch-name>
+### 2) Commit your changes
 
-3) CI runs automatically
-   - Shell review (advisory): posts inline comments with reviewdog (non-blocking).
-   - Shell gatekeeper (blocking): required check; must pass (syntax, shellcheck, shfmt).
+```bash
+git add .
+git commit -m "your descriptive message"
+```
 
-4) Address feedback
-   - Fix issues raised by pre-commit, reviewdog, or CI.
-   - Push updates; CI re-runs.
+**What happens during commit:**
 
-5) Merge
-   - When all required checks are green, the PR can be merged (per repository rules).
+- Pre-commit runs automatically
+- Many issues are **auto-fixed** (formatting, whitespace, etc.)
+- If auto-fixes are made, you'll need to stage and commit again
+- If unfixable issues exist, commit is blocked until you fix them
+
+### 3) Push and open a Pull Request
+
+```bash
+git push origin your-branch-name
+```
+
+### 4) CI runs automatically
+
+- **pre-commit.ci**: Runs the same checks online
+- **Shell Quality workflow**: Additional shell script validation
+- All checks must pass before merging
+
+### 5) Address any feedback
+
+Fix issues raised by pre-commit, CI, or code reviewers, then push updates.
 
 ---
 
-## PR Checklist
+## Common Pre-commit Scenarios
 
-- [ ] I ran `pre-commit run --all-files` locally.
-- [ ] All shell scripts are formatted (shfmt).
-- [ ] All shell scripts pass lint (shellcheck).
-- [ ] CI shows “Shell gatekeeper (blocking)” as passing.
+### ✅ Everything works smoothly
+
+```bash
+git commit -m "Add new feature"
+# Pre-commit runs, everything passes
+# Commit succeeds
+```
+
+### 🔧 Auto-fixes applied
+
+```bash
+git commit -m "Update documentation"
+# Pre-commit fixes formatting issues automatically
+# You'll see: "files were modified by this hook"
+git add .  # Stage the auto-fixes
+git commit -m "Update documentation"  # Commit again
+```
+
+### ❌ Manual fixes needed
+
+```bash
+git commit -m "Add shell script"
+# Pre-commit finds shellcheck errors
+# Fix the reported issues in your files
+git add .
+git commit -m "Add shell script"  # Try again
+```
+
+### 🚀 Skip pre-commit (emergency only)
+
+```bash
+git commit -m "Urgent hotfix" --no-verify
+# Only use in emergencies - CI will still catch issues
+```
 
 ---
 
-## CI Status Badge
+## Troubleshooting
 
-[![Shell Quality](https://github.com/cosminneamtiu02/grid5k-MLRW/actions/workflows/shell-quality.yml/badge.svg)](https://github.com/cosminneamtiu02/grid5k-MLRW/actions/workflows/shell-quality.yml)
+### Pre-commit is too slow
+
+```bash
+# Run only on changed files (default behavior)
+git commit -m "your message"
+
+# Skip specific hooks if needed
+SKIP=actionlint git commit -m "your message"
+```
+
+### Reset pre-commit environment
+
+```bash
+pre-commit clean
+pre-commit install --install-hooks
+```
+
+### Update pre-commit hooks
+
+```bash
+pre-commit autoupdate
+```
+
+---
+
+## Contribution Checklist
+
+- [ ] I ran `pre-commit install` to set up hooks
+- [ ] I tested my changes with `pre-commit run --all-files`
+- [ ] All auto-fixes have been committed
+- [ ] All pre-commit checks pass locally
+- [ ] CI shows green checkmarks for all required checks
+
+---
+
+## Questions?
+
+- Check the [pre-commit documentation](https://pre-commit.com/)
+- Look at `.pre-commit-config.yaml` to see what checks are enabled
+- Open an issue if you need help with setup
