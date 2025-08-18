@@ -1,6 +1,6 @@
 # Contributing Guide
 
-[![Shell Quality](https://github.com/cosminneamtiu02/grid5k-MLRW/actions/workflows/shell-quality.yml/badge.svg)](https://github.com/cosminneamtiu02/grid5k-MLRW/actions/workflows/shell-quality.yml)
+[![Shell Quality](https://github.com/cosminneamtiu02/SwiftDeploy-G5K/actions/workflows/shell-quality.yml/badge.svg)](https://github.com/cosminneamtiu02/SwiftDeploy-G5K/actions/workflows/shell-quality.yml)
 [![pre-commit](https://img.shields.io/badge/pre--commit-enabled-brightgreen?logo=pre-commit&logoColor=white)](https://github.com/pre-commit/pre-commit)
 
 Thanks for contributing! 🎉
@@ -28,8 +28,8 @@ If any check fails, the commit is blocked until you fix the issues. Many problem
 ### 1) Clone the repository
 
 ```bash
-git clone https://github.com/cosminneamtiu02/grid5k-MLRW.git
-cd grid5k-MLRW
+git clone https://github.com/cosminneamtiu02/SwiftDeploy-G5K.git
+cd SwiftDeploy-G5K
 ```
 
 ### 2) Install pre-commit (choose one)

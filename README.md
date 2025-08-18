@@ -1,6 +1,6 @@
-# grid5k-MLRW
+# SwiftDeploy-G5K
 
-[![Shell Quality](https://github.com/cosminneamtiu02/grid5k-MLRW/actions/workflows/shell-quality.yml/badge.svg)](https://github.com/cosminneamtiu02/grid5k-MLRW/actions/workflows/shell-quality.yml)
+[![Shell Quality](https://github.com/cosminneamtiu02/SwiftDeploy-G5K/actions/workflows/shell-quality.yml/badge.svg)](https://github.com/cosminneamtiu02/SwiftDeploy-G5K/actions/workflows/shell-quality.yml)
 [![pre-commit](https://img.shields.io/badge/pre--commit-enabled-brightgreen?logo=pre-commit&logoColor=white)](https://github.com/pre-commit/pre-commit)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
@@ -43,8 +43,8 @@ sophia.grid5000.fr, toulouse.grid5000.fr
 Create (or reuse) a workspace directory for this project:
 
 ```bash
-mkdir -p $HOME/work/grid5k-MLRW
-cd $HOME/work/grid5k-MLRW
+mkdir -p $HOME/work/SwiftDeploy-G5K
+cd $HOME/work/SwiftDeploy-G5K
 ```
 
 ### 4) Clone this repository (first time)
@@ -52,14 +52,14 @@ cd $HOME/work/grid5k-MLRW
 HTTPS (read-only; works for everyone):
 
 ```bash
-git clone https://github.com/cosminneamtiu02/grid5k-MLRW.git
-cd grid5k-MLRW
+git clone https://github.com/cosminneamtiu02/SwiftDeploy-G5K.git
+cd SwiftDeploy-G5K
 ```
 
 If you have push rights and prefer SSH:
 
 ```bash
-git remote set-url origin git@github.com:cosminneamtiu02/grid5k-MLRW.git
+git remote set-url origin git@github.com:cosminneamtiu02/SwiftDeploy-G5K.git
 ```
 
 ### 5) Update to the latest version (next times)
@@ -67,7 +67,7 @@ git remote set-url origin git@github.com:cosminneamtiu02/grid5k-MLRW.git
 From the FE workspace:
 
 ```bash
-cd $HOME/work/grid5k-MLRW/grid5k-MLRW
+cd $HOME/work/SwiftDeploy-G5K/SwiftDeploy-G5K
 git pull --ff-only
 ```
 
@@ -84,11 +84,11 @@ git stash pop
 Run this in your workspace directory:
 
 ```bash
-cd $HOME/work/grid5k-MLRW
-if [ -d grid5k-MLRW/.git ]; then
-  git -C grid5k-MLRW pull --ff-only
+cd $HOME/work/SwiftDeploy-G5K
+if [ -d SwiftDeploy-G5K/.git ]; then
+  git -C SwiftDeploy-G5K pull --ff-only
 else
-  git clone https://github.com/cosminneamtiu02/grid5k-MLRW.git
+  git clone https://github.com/cosminneamtiu02/SwiftDeploy-G5K.git
 fi
 ```
 
@@ -98,8 +98,8 @@ If you work across multiple sites, you can keep a per-site folder:
 
 ```bash
 export G5K_SITE=nancy
-mkdir -p $HOME/work/$G5K_SITE/grid5k-MLRW
-cd $HOME/work/$G5K_SITE/grid5k-MLRW
+mkdir -p $HOME/work/$G5K_SITE/SwiftDeploy-G5K
+cd $HOME/work/$G5K_SITE/SwiftDeploy-G5K
 # then clone/update as above
 ```
 
