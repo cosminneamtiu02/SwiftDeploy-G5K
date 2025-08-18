@@ -1,51 +1,51 @@
 - name: bug
-  color: d73a4a
+  color: "d73a4a"
   description: Something isn't working
 
 - name: feature
-  color: a2eeef
+  color: "a2eeef"
   description: New feature or request
 
 - name: documentation
-  color: 0075ca
+  color: "0075ca"
   description: Improvements or additions to documentation
 
 - name: good first issue
-  color: 7057ff
+  color: "7057ff"
   description: Good for newcomers
 
 - name: help wanted
-  color: 008672
+  color: "008672"
   description: Extra attention is needed
 
 - name: question
-  color: d876e3
+  color: "d876e3"
   description: Further information is requested
 
 - name: in progress
-  color: fbca04
+  color: "fbca04"
   description: Work on this issue/feature is currently in progress
 
 - name: blocked
-  color: b60205
+  color: "b60205"
   description: Cannot move forward until dependencies are resolved
 
 - name: requires info
-  color: c2e0c6
+  color: "c2e0c6"
   description: Needs more details or clarification from the reporter
 
 - name: not implemented
-  color: fef2c0
+  color: "fef2c0"
   description: Acknowledged but not planned to implement yet
 
 - name: done
-  color: 0e8a16
+  color: "0e8a16"
   description: Completed and merged/resolved
 
 - name: fixed
-  color: 1d76db
+  color: "1d76db"
   description: Bug has been fixed and validated
 
 - name: not fixed
-  color: e99695
+  color: "e99695"
   description: Bug acknowledged but not fixed yet
