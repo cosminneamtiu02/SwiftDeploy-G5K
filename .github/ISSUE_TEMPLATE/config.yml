@@ -1,5 +1,19 @@
 blank_issues_enabled: false
+
 contact_links:
-  - name: Contributing Guide
+  - name: 📖 Contributing Guide
     url: https://github.com/cosminneamtiu02/grid5k-MLRW/blob/main/CONTRIBUTING.md
-    about: Please read this before opening an issue or PR.
+    about: Please read this before opening an issue or pull request.
+
+issue_templates:
+  - name: "🐛 Bug report"
+    description: Report something that isn't working as expected
+    labels: ["bug", "not fixed"]
+    assignees: ["cosminneamtiu02"]
+    file: bug_report.yml
+
+  - name: "✨ Feature request"
+    description: Suggest an idea or improvement
+    labels: ["feature", "not implemented"]
+    assignees: ["cosminneamtiu02"]
+    file: feature_request.yml
