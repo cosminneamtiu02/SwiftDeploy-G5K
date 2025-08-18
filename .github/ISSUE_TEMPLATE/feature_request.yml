@@ -34,16 +34,3 @@ body:
       label: Additional Context
       description: Links, references, mockups, or examples.
 
-  - type: dropdown
-    id: status
-    attributes:
-      label: Feature Status
-      description: Track the current status of this feature request.
-      options:
-        - not implemented
-        - in progress
-        - blocked
-        - requires info
-        - done
-    validations:
-      required: false
