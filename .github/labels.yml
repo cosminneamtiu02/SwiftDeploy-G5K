@@ -1,6 +1,3 @@
-# Default labels for issues & PRs
-# You can edit colors with hex codes
-
 - name: bug
   color: d73a4a
   description: Something isn't working
@@ -25,7 +22,6 @@
   color: d876e3
   description: Further information is requested
 
-# ---- Workflow / Status labels ----
 - name: in progress
   color: fbca04
   description: Work on this issue/feature is currently in progress
