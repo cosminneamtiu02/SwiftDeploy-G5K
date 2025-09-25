@@ -1,0 +1,13 @@
+[DRY-RUN] bash
+/home/cosmin/proiecte/SwiftDeploy-G5K/experiments-runner/bin/experiments-delegator/on-fe/experiments-delegator.sh
+--parallel
+5
+--execute-command
+./run_experiment
+--full-path
+/ABSOLUTE/MACHINE/PATH/csnn
+--params-file
+/ABSOLUTE/FE/PATH/params/csnn_params.txt
+--collection-json
+{"collection_strategy":"csnn_collection.sh","path_to_save_experiment_results_on_fe":"/ABSOLUTE/FE/PATH/results/csnn","path_to_saved_experiment_results_on_machine":"/ABSOLUTE/MACHINE/PATH/results/csnn"}
+--dry-run
