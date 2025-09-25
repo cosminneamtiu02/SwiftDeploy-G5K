@@ -92,7 +92,6 @@ experiments-runner/
       ├─ libremote.sh                 # ssh/scp wrappers with retries
       └─ libosdetect.sh               # maps os_distribution_type → pkg mgr
 
-
 Create all files with executable bits where relevant, shebang #!/usr/bin/env bash, and headers describing purpose, inputs, outputs, exit codes.
 
 Progress Checklist (update live as you work)
@@ -113,6 +112,7 @@ Maintain and print a list like this at the top of your output and after each maj
 Mark [x] as items complete. For each completed item, include What/Why/How notes.
 
 Config JSONs
+
 1) experiments-configurations/_TEMPLATE.json (generate exactly; note empty experiments_collection as requested)
 {
   "running_experiments": {
@@ -163,7 +163,6 @@ Config JSONs
     "os_distribution_type": 1
   }
 }
-
 
 Hardcode the absolute path to experiments-configurations/ inside experiments-controller.sh, so the controller only needs the filename, e.g. csnn-faces.json.
 
@@ -224,7 +223,6 @@ CLI
 
 ./experiments-controller.sh --config <FILENAME.json> [--dry-run] [--verbose]
 
-
 Logging
 
 Log each phase START/END + duration.
@@ -261,7 +259,6 @@ experiments_node/
 └─ on-fe/
    └─ logs/   # (optional rsync target)
 
-
 Uploads required scripts: on-machine/run-batch.sh, experiments-collector/on-machine/*.sh, and bootstrap files.
 
 Exports env vars (see write-env.sh) and installs dependencies (see install-dependencies.sh).
@@ -293,6 +290,7 @@ RHEL7+: dnf makecache && dnf install -y $(packages)
 Print a table-like summary of installed packages and any failures.
 
 D) bin/experiments-delegator/
+
 1) On Frontend (on-fe/experiments-delegator.sh)
 
 Inputs:
@@ -326,7 +324,6 @@ Build the command list by prefixing each selected line with execute_command, e.g
 ./run_experiment 5 5 2 4 800 44 8
 ./run_experiment 5 5 2 5 800 42 8
 ...
-
 
 Upload the command list to the remote machine (e.g., ~/experiments_node/bootstrap/commands.pending).
 
