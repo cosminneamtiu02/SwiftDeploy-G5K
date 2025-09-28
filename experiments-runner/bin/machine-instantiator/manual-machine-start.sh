@@ -9,7 +9,7 @@ IFS=$'\n\t'
 trap 'echo "[ERROR] ${BASH_SOURCE[0]}:$LINENO ${BASH_COMMAND}" >&2' ERR
 
 usage() {
-  cat <<EOF
+	cat <<EOF
 manual-machine-start.sh --help
 
 This script prints instructions for manual Grid'5000 instantiation and validates SSH access.
@@ -20,7 +20,19 @@ Environment expected after manual steps:
   G5K_SSH_KEY  Path to private key for SSH
 
 Validation performed:
-  ssh -o BatchMode=yes -i "$G5K_SSH_KEY" "$G5K_USER@$G5K_HOST" true
+if [[ -z "${G5K_SSH_KEY:-}" ]]; then
+	echo "G5K_SSH_KEY is not set" >&2
+	exit 1
+fi
+if [[ -z "${G5K_USER:-}" ]]; then
+	echo "G5K_USER is not set" >&2
+	exit 1
+fi
+if [[ -z "${G5K_HOST:-}" ]]; then
+	echo "G5K_HOST is not set" >&2
+	exit 1
+fi
+ssh -o BatchMode=yes -i "${G5K_SSH_KEY}" "${G5K_USER}@${G5K_HOST}" true
 
 Exit codes:
   0 OK
@@ -29,7 +41,10 @@ Exit codes:
 EOF
 }
 
-if [[ "${1:-}" == "--help" ]]; then usage; exit 0; fi
+if [[ ${1:-} == "--help" ]]; then
+	usage
+	exit 0
+fi
 
 echo "[INFO] Manual instantiation selected. Please perform the following on Grid'5000:"
 echo "  1) Reserve nodes with oarsub and wait for allocation."
@@ -40,19 +55,24 @@ echo "     export G5K_HOST=node-1.site.grid5000.fr"
 echo "     export G5K_SSH_KEY=~/.ssh/id_rsa"
 
 echo "[INFO] Verifying environment variables..."
-: "${G5K_USER:?G5K_USER is required}"
-: "${G5K_HOST:?G5K_HOST is required}"
-: "${G5K_SSH_KEY:?G5K_SSH_KEY is required}"
 
-if [[ ! -f "$G5K_SSH_KEY" ]]; then
-  echo "[ERROR] SSH key not found: $G5K_SSH_KEY" >&2
-  exit 1
+# Check required environment variables
+for v in G5K_USER G5K_HOST G5K_SSH_KEY; do
+	if [[ -z ${!v:-} ]]; then
+		echo "[ERROR] Environment variable ${v} is required but not set." >&2
+		exit 2
+	fi
+done
+
+if [[ ! -f ${G5K_SSH_KEY} ]]; then
+	echo "[ERROR] SSH key not found: ${G5K_SSH_KEY}" >&2
+	exit 1
 fi
 
-echo "[INFO] Checking SSH connectivity to $G5K_USER@$G5K_HOST ..."
-if ! ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -i "$G5K_SSH_KEY" "$G5K_USER@$G5K_HOST" true; then
-  echo "[ERROR] Unable to SSH to $G5K_USER@$G5K_HOST" >&2
-  exit 2
+echo "[INFO] Checking SSH connectivity to ${G5K_USER}@${G5K_HOST} ..."
+if ! ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -i "${G5K_SSH_KEY}" "${G5K_USER}@${G5K_HOST}" true; then
+	echo "[ERROR] Unable to SSH to ${G5K_USER}@${G5K_HOST}" >&2
+	exit 2
 fi
 
 echo "[INFO] Manual machine instantiation verified."
