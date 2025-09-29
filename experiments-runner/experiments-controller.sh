@@ -293,7 +293,7 @@ auto_detect_g5k_env() {
 
 	# SSH key
 	if [[ -z ${G5K_SSH_KEY:-} ]]; then
-		for cand in "${HOME}/.ssh/id_ed25519" "${HOME}/.ssh/id_rsa"; do
+		for cand in "${HOME}/.ssh/id_rsa" "${HOME}/.ssh/id_ed25519"; do
 			if [[ -f ${cand} ]]; then
 				G5K_SSH_KEY="${cand}"
 				export G5K_SSH_KEY

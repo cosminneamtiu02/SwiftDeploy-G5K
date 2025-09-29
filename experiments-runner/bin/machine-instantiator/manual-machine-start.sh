@@ -51,6 +51,11 @@ echo "[INFO] Manual instantiation selected. Running automatic deploy from the FE
 echo "[INFO] Verifying environment variables..."
 
 # Check required environment variables
+if [[ -z ${G5K_SSH_KEY:-} && -f ${HOME}/.ssh/id_rsa ]]; then
+	G5K_SSH_KEY="${HOME}/.ssh/id_rsa"
+	export G5K_SSH_KEY
+	echo "[INFO] Auto-selected SSH key: ${G5K_SSH_KEY}"
+fi
 for v in G5K_USER G5K_HOST G5K_SSH_KEY; do
 	if [[ -z ${!v:-} ]]; then
 		echo "[ERROR] Environment variable ${v} is required but not set." >&2
