@@ -76,14 +76,37 @@ fi
 echo "[INFO] Deploying image to ${G5K_HOST} using kadeploy3 (YAML: ${IMAGE_YAML_PATH})"
 # Prefer host if provided; fallback to OAR_NODEFILE if available
 if command -v kadeploy3 >/dev/null 2>&1; then
+	deploy_target_args=()
 	if [[ -n ${G5K_HOST:-} ]]; then
-		kadeploy3 -m "${G5K_HOST}" -a "${IMAGE_YAML_PATH}"
+		deploy_target_args=(-m "${G5K_HOST}")
 	elif [[ -n ${OAR_NODEFILE:-} && -f ${OAR_NODEFILE} ]]; then
-		kadeploy3 -f "${OAR_NODEFILE}" -a "${IMAGE_YAML_PATH}"
+		deploy_target_args=(-f "${OAR_NODEFILE}")
 	else
 		echo "[ERROR] Neither G5K_HOST nor OAR_NODEFILE available to run kadeploy3." >&2
 		exit 2
 	fi
+
+	# Retry wrapper for kadeploy3 to handle transient API timeouts
+	KADE_RETRIES=${KADE_RETRIES:-3}
+	KADE_BACKOFF_BASE=${KADE_BACKOFF_BASE:-5}
+	attempt=1
+	while :; do
+		set +e
+		kadeploy3 "${deploy_target_args[@]}" -a "${IMAGE_YAML_PATH}"
+		rc=$?
+		set -e
+		if [[ ${rc} -eq 0 ]]; then
+			break
+		fi
+		if ((attempt >= KADE_RETRIES)); then
+			echo "[ERROR] kadeploy3 failed after ${attempt} attempt(s) (last rc=${rc})." >&2
+			exit "${rc}"
+		fi
+		sleep_secs=$((KADE_BACKOFF_BASE * attempt))
+		echo "[WARN] kadeploy3 failed (rc=${rc}). Retrying in ${sleep_secs}s... (${attempt}/${KADE_RETRIES})" >&2
+		sleep "${sleep_secs}"
+		attempt=$((attempt + 1))
+	done
 else
 	echo "[ERROR] kadeploy3 command not found on FE." >&2
 	exit 2
