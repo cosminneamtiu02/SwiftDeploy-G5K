@@ -330,6 +330,8 @@ if [[ -z ${LOG_DIR} ]]; then
 fi
 mkdir -p "${LOG_DIR}"
 ln -sfn "${LOG_DIR}" "${SCRIPT_DIR}/logs/last-run"
+# Export for child scripts to write diagnostics
+export LOG_DIR
 
 phase_log() { echo "${LOG_DIR}/$1"; }
 
@@ -523,8 +525,16 @@ phase_collect() {
 	if [[ -n ${fe_path} && ${DRY_RUN} != true ]]; then
 		mkdir -p "${fe_path}"
 	fi
-	step_cmd=(bash "${COLLECT_ONM_SCRIPT}"
-		${machine_path:+--machine-path "${machine_path}"} ${fe_path:+--fe-path "${fe_path}"} ${DRY_RUN:+--dry-run})
+	step_cmd=(bash "${COLLECT_ONM_SCRIPT}")
+	if [[ -n ${machine_path} ]]; then
+		step_cmd+=("--machine-path" "${machine_path}")
+	fi
+	if [[ -n ${fe_path} ]]; then
+		step_cmd+=("--fe-path" "${fe_path}")
+	fi
+	if [[ ${DRY_RUN} == true ]]; then
+		step_cmd+=("--dry-run")
+	fi
 	local rc
 	# shellcheck disable=SC2312
 	run_step "Phase 4/4: Results collection" "$(phase_log 04-collect.log)" "${step_cmd[@]}"

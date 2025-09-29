@@ -133,6 +133,10 @@ if command -v oarsh >/dev/null 2>&1 && [[ -n ${OAR_NODEFILE:-} || -n ${OAR_JOB_I
 				else
 					echo "[WARN] Unable to connect to ${G5K_HOST} via oarsh (with/without -t) or ssh right now." >&2
 					echo "      Downstream steps will retry using oarsh/oarcp." >&2
+					# Run diagnostics to help debugging connectivity, write into LOG_DIR if set
+					SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+					ROOT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+					bash "${ROOT_DIR}/bin/utils/diagnostics-g5k-connectivity.sh" || true
 				fi
 			fi
 		fi
@@ -146,6 +150,9 @@ if command -v oarsh >/dev/null 2>&1 && [[ -n ${OAR_NODEFILE:-} || -n ${OAR_JOB_I
 				echo "[INFO] Connectivity OK via: ssh ${G5K_USER}@${G5K_HOST}"
 			else
 				echo "[WARN] Unable to connect to ${G5K_HOST} via oarsh or ssh right now. Continuing..." >&2
+				SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+				ROOT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+				bash "${ROOT_DIR}/bin/utils/diagnostics-g5k-connectivity.sh" || true
 			fi
 		fi
 	fi
@@ -155,6 +162,9 @@ else
 		echo "[INFO] Connectivity OK via: ssh ${G5K_USER}@${G5K_HOST}"
 	else
 		echo "[WARN] Unable to SSH to ${G5K_USER}@${G5K_HOST}. Continuing..." >&2
+		SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+		ROOT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+		bash "${ROOT_DIR}/bin/utils/diagnostics-g5k-connectivity.sh" || true
 	fi
 fi
 
