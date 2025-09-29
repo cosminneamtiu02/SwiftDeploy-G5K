@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# Lightweight wrapper to call system shfmt. Pre-commit hooks that expect
+# ./.tools/shfmt will invoke this script which delegates to the real binary.
+set -euo pipefail
+if command -v shfmt >/dev/null 2>&1; then
+	exec shfmt "$@"
+else
+	echo "shfmt: binary not found in PATH" >&2
+	exit 127
+fi
