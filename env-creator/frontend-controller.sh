@@ -6,9 +6,9 @@ IFS=$'\n\t'
 # -------- HARDCODED FOLDERS (repo-relative) --------
 # Resolve repository root (one level up from this script)
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-CONFIGS_DIR="${REPO_ROOT}/g5k_env_creator/configs"
-NODE_SCRIPT_DIR="${REPO_ROOT}/g5k_env_creator/node_build_scripts"
-DEPLOYED_NODE_FILE="${REPO_ROOT}/g5k_env_creator/current_deployed_node.txt"
+CONFIGS_DIR="${REPO_ROOT}/env-creator/configs"
+NODE_SCRIPT_DIR="${REPO_ROOT}/env-creator/node-build_scripts"
+DEPLOYED_NODE_FILE="${REPO_ROOT}/env-creator/current_deployed_node.txt"
 
 # -------- USER INPUT --------
 CONFIG_FILE="${1:-}" # e.g., csnn_ckplus.conf
