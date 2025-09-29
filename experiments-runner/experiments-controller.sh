@@ -184,12 +184,19 @@ check_dependencies
 # Prefer values from the current OAR interactive session when available.
 auto_detect_g5k_env() {
 	local changed=false
+	local WAIT_HOST_TIMEOUT WAIT_HOST_INTERVAL
+	WAIT_HOST_TIMEOUT="${WAIT_HOST_TIMEOUT:-600}"
+	WAIT_HOST_INTERVAL="${WAIT_HOST_INTERVAL:-2}"
+
+	# User
 	if [[ -z ${G5K_USER:-} ]]; then
 		G5K_USER="${USER:-$(whoami)}"
 		export G5K_USER
 		log_debug "Auto-detected G5K_USER=${G5K_USER}"
 		changed=true
 	fi
+
+	# Host
 	if [[ -z ${G5K_HOST:-} ]]; then
 		if [[ -n ${OAR_NODEFILE:-} && -f ${OAR_NODEFILE} ]]; then
 			G5K_HOST="$(head -n1 "${OAR_NODEFILE}")"
@@ -197,25 +204,50 @@ auto_detect_g5k_env() {
 			log_debug "Auto-detected G5K_HOST from OAR_NODEFILE: ${G5K_HOST}"
 			changed=true
 		else
-			# FE-side fallback: query OAR for a running job and infer host and job id
-			if command -v oarstat >/dev/null 2>&1; then
-				local -a ids
+			# Try env-creator host file first
+			local hostfile="${REPO_ROOT}/env-creator/current_deployed_node.txt"
+			if [[ -f ${hostfile} && -s ${hostfile} ]]; then
+				G5K_HOST="$(head -n1 "${hostfile}")"
+				export G5K_HOST
+				log_debug "Auto-detected G5K_HOST from host file: ${hostfile} -> ${G5K_HOST}"
+				changed=true
+			fi
+			# FE: wait for a job to get a host assignment if needed
+			if [[ -z ${G5K_HOST:-} ]] && command -v oarstat >/dev/null 2>&1; then
 				local ids_output=""
-			else
-				# Check env-creator host file (like in env creator)
-				local hostfile="${REPO_ROOT}/env-creator/current_deployed_node.txt"
-				if [[ -f ${hostfile} && -s ${hostfile} ]]; then
-					G5K_HOST="$(head -n1 "${hostfile}")"
-					export G5K_HOST
-					log_debug "Auto-detected G5K_HOST from host file: ${hostfile} -> ${G5K_HOST}"
-					changed=true
+				local -a ids
+				ids_output="$(oarstat -u 2>/dev/null | awk '/^[0-9]+/ {print $1}')" || true
+				mapfile -t ids <<<"${ids_output}"
+				if [[ -z ${OAR_JOB_ID:-} && ${#ids[@]} -gt 0 ]]; then
+					OAR_JOB_ID="${ids[$((${#ids[@]} - 1))]}"
+					export OAR_JOB_ID
+					log_info "Detected OAR job: ${OAR_JOB_ID}; waiting for node assignment (timeout ${WAIT_HOST_TIMEOUT}s)"
 				fi
-				# FE fallback using oarstat if still unknown
-				if [[ -z ${G5K_HOST:-} ]] && command -v oarstat >/dev/null 2>&1; then
-					local -a ids
-					local ids_output=""
-					ids_output="$(oarstat -u 2>/dev/null | awk '/^[0-9]+/ {print $1}')" || true
-					mapfile -t ids <<<"${ids_output}"
+				if [[ -n ${OAR_JOB_ID:-} ]]; then
+					local deadline now hostnames host
+					deadline=$(($(date +%s) + WAIT_HOST_TIMEOUT))
+					while :; do
+						now=$(date +%s)
+						if ((now >= deadline)); then
+							log_warn "Timed out waiting for node assignment on job ${OAR_JOB_ID}."
+							break
+						fi
+						hostnames="$(oarstat -j "${OAR_JOB_ID}" -f | awk -F': ' '/^assigned_hostnames/ {print $2}')" || true
+						if [[ -n ${hostnames} ]]; then
+							host="$(awk '{print $1}' <<<"${hostnames}")"
+							if [[ -n ${host} ]]; then
+								G5K_HOST="${host}"
+								export G5K_HOST
+								log_info "Assigned host detected for job ${OAR_JOB_ID}: ${G5K_HOST}"
+								changed=true
+								break
+							fi
+						fi
+						sleep "${WAIT_HOST_INTERVAL}"
+					done
+				fi
+				# As a fallback, scan recent jobs for any with assigned_hostnames
+				if [[ -z ${G5K_HOST:-} && ${#ids[@]} -gt 0 ]]; then
 					local i id hostnames host
 					for ((i = ${#ids[@]} - 1; i >= 0; i--)); do
 						id="${ids[${i}]}"
@@ -225,56 +257,41 @@ auto_detect_g5k_env() {
 							if [[ -n ${host} ]]; then
 								G5K_HOST="${host}"
 								export G5K_HOST
-								log_debug "Auto-detected G5K_HOST from FE via oarstat: ${G5K_HOST}"
+								if [[ -z ${OAR_JOB_ID:-} ]]; then
+									OAR_JOB_ID="${id}"
+									export OAR_JOB_ID
+								fi
+								log_debug "Auto-detected G5K_HOST from FE via oarstat: ${G5K_HOST} (job ${OAR_JOB_ID})"
 								changed=true
 								break
 							fi
 						fi
 					done
 				fi
-				ids_output="$(oarstat -u 2>/dev/null | awk '/^[0-9]+/ {print $1}')" || true
-				mapfile -t ids <<<"${ids_output}"
-				# Infer OAR_JOB_ID when missing and host is known (by matching assigned_hostnames)
-				if [[ -z ${OAR_JOB_ID:-} && -n ${G5K_HOST:-} ]] && command -v oarstat >/dev/null 2>&1; then
-					local -a ids2
-					local ids_output2=""
-					ids_output2="$(oarstat -u 2>/dev/null | awk '/^[0-9]+/ {print $1}')" || true
-					mapfile -t ids2 <<<"${ids_output2}"
-					local j jid hns
-					for ((j = ${#ids2[@]} - 1; j >= 0; j--)); do
-						jid="${ids2[${j}]}"
-						hns="$(oarstat -j "${jid}" -f | awk -F': ' '/^assigned_hostnames/ {print $2}')" || true
-						if [[ -n ${hns} && ${hns} == *"${G5K_HOST}"* ]]; then
-							OAR_JOB_ID="${jid}"
-							export OAR_JOB_ID
-							log_debug "Auto-detected OAR_JOB_ID=${OAR_JOB_ID} by matching host ${G5K_HOST}"
-							break
-						fi
-					done
-				fi
-				local i id hostnames host
-				for ((i = ${#ids[@]} - 1; i >= 0; i--)); do
-					id="${ids[${i}]}"
-					hostnames="$(oarstat -j "${id}" -f | awk -F': ' '/^assigned_hostnames/ {print $2}')" || true
-					if [[ -n ${hostnames} ]]; then
-						host="$(awk '{print $1}' <<<"${hostnames}")"
-						if [[ -n ${host} ]]; then
-							G5K_HOST="${host}"
-							export G5K_HOST
-							if [[ -z ${OAR_JOB_ID:-} ]]; then
-								OAR_JOB_ID="${id}"
-								export OAR_JOB_ID
-								log_debug "Auto-detected OAR_JOB_ID=${OAR_JOB_ID} from FE"
-							fi
-							log_debug "Auto-detected G5K_HOST from FE via oarstat: ${G5K_HOST}"
-							changed=true
-							break
-						fi
-					fi
-				done
 			fi
 		fi
 	fi
+
+	# Infer OAR_JOB_ID by matching host if still missing
+	if [[ -z ${OAR_JOB_ID:-} && -n ${G5K_HOST:-} ]] && command -v oarstat >/dev/null 2>&1; then
+		local ids_output2=""
+		local -a ids2
+		ids_output2="$(oarstat -u 2>/dev/null | awk '/^[0-9]+/ {print $1}')" || true
+		mapfile -t ids2 <<<"${ids_output2}"
+		local j jid hns
+		for ((j = ${#ids2[@]} - 1; j >= 0; j--)); do
+			jid="${ids2[${j}]}"
+			hns="$(oarstat -j "${jid}" -f | awk -F': ' '/^assigned_hostnames/ {print $2}')" || true
+			if [[ -n ${hns} && ${hns} == *"${G5K_HOST}"* ]]; then
+				OAR_JOB_ID="${jid}"
+				export OAR_JOB_ID
+				log_debug "Auto-detected OAR_JOB_ID=${OAR_JOB_ID} by matching host ${G5K_HOST}"
+				break
+			fi
+		done
+	fi
+
+	# SSH key
 	if [[ -z ${G5K_SSH_KEY:-} ]]; then
 		for cand in "${HOME}/.ssh/id_ed25519" "${HOME}/.ssh/id_rsa"; do
 			if [[ -f ${cand} ]]; then
@@ -286,6 +303,7 @@ auto_detect_g5k_env() {
 			fi
 		done
 	fi
+
 	if [[ ${changed} == true ]]; then
 		log_info "Using Grid'5000 connection: user=${G5K_USER:-?} host=${G5K_HOST:-?} key=${G5K_SSH_KEY:-?} ${OAR_JOB_ID:+job=${OAR_JOB_ID}}"
 	fi
@@ -294,11 +312,17 @@ auto_detect_g5k_env() {
 auto_detect_g5k_env
 
 # Resolve config
-CONFIG_JSON="${CONFIG_DIR_ABS}/${CONFIG_FILE_NAME}"
-[[ -f ${CONFIG_JSON} ]] || {
-	log_err "Config file not found in ${CONFIG_DIR_ABS}: ${CONFIG_FILE_NAME}"
+# Resolve config: accept either a plain filename (resolved under CONFIG_DIR_ABS)
+# or an explicit path passed by the user.
+if [[ ${CONFIG_FILE_NAME} == */* ]]; then
+	CONFIG_JSON="${CONFIG_FILE_NAME}"
+else
+	CONFIG_JSON="${CONFIG_DIR_ABS}/${CONFIG_FILE_NAME}"
+fi
+if [[ ! -f ${CONFIG_JSON} ]]; then
+	log_err "Config file not found: ${CONFIG_JSON}"
 	exit 2
-}
+fi
 
 TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
 if [[ -z ${LOG_DIR} ]]; then
