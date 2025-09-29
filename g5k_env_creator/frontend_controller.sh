@@ -3,12 +3,12 @@
 set -euo pipefail
 IFS=$'\n\t'
 
-# -------- HARDCODED FOLDERS --------
-BASE_DIR="$(pwd)"
-PLACEHOLDER_FOLDER="grid5k-csnn"
-CONFIGS_DIR="${BASE_DIR}/${PLACEHOLDER_FOLDER}/g5k_env_creator/configs"
-NODE_SCRIPT_DIR="${BASE_DIR}/${PLACEHOLDER_FOLDER}/g5k_env_creator/node_build_scripts"
-DEPLOYED_NODE_FILE="${BASE_DIR}/${PLACEHOLDER_FOLDER}/g5k_env_creator/current_deployed_node.txt"
+# -------- HARDCODED FOLDERS (repo-relative) --------
+# Resolve repository root (one level up from this script)
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+CONFIGS_DIR="${REPO_ROOT}/g5k_env_creator/configs"
+NODE_SCRIPT_DIR="${REPO_ROOT}/g5k_env_creator/node_build_scripts"
+DEPLOYED_NODE_FILE="${REPO_ROOT}/g5k_env_creator/current_deployed_node.txt"
 
 # -------- USER INPUT --------
 CONFIG_FILE="${1:-}" # e.g., csnn_ckplus.conf
@@ -30,15 +30,19 @@ fi
 source "${CONFIG_PATH}"
 
 # -------- DERIVED VARIABLES (from sourced config) --------
+# TAR file path (under user's home)
 TAR_FILE="${HOME}/envs/${GENERAL_NAME}.tar.zst"
 # Directory where generated YAML files will be stored. Can be overridden by
 # setting YAML_OUTPUT_DIR in the environment before running this script.
 # Default is a repo-relative folder so generated YAMLs are kept together and
 # can be ignored from commits.
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 YAML_OUTPUT_DIR="${YAML_OUTPUT_DIR:-${REPO_ROOT}/experiments-runner/generated-yamls}"
 YAML_FILE="${YAML_OUTPUT_DIR}/${GENERAL_NAME}.yaml"
 LOCAL_SCRIPT_PATH="${NODE_SCRIPT_DIR}/${SETUP_SCRIPT}"
+
+# Ensure the TAR directory and YAML output directory exist (relative to home/repo)
+mkdir -p "${HOME}/envs"
+mkdir -p "${YAML_OUTPUT_DIR}"
 
 # -------- PRE-CHECK 1: Clean up leftover node file if present --------
 if [[ -f ${DEPLOYED_NODE_FILE} ]]; then
