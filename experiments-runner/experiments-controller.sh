@@ -465,8 +465,10 @@ phase_prepare() {
 		return 2
 	fi
 	local step_cmd
-	step_cmd=(bash "${PREPARE_SCRIPT}"
-		--config "${CONFIG_JSON}" --os-type "${OS_TYPE}" --full-path "${FULL_PATH}" ${DRY_RUN:+--dry-run})
+	step_cmd=(bash "${PREPARE_SCRIPT}" --config "${CONFIG_JSON}" --os-type "${OS_TYPE}" --full-path "${FULL_PATH}")
+	if [[ ${DRY_RUN} == true ]]; then
+		step_cmd+=("--dry-run")
+	fi
 	local rc
 	# shellcheck disable=SC2312
 	run_step "Phase 2/4: Project preparation" "$(phase_log 02-prepare.log)" "${step_cmd[@]}"
@@ -483,9 +485,10 @@ phase_delegate() {
 		return 2
 	fi
 	local step_cmd
-	step_cmd=(bash "${DELEGATOR_SCRIPT}"
-		--parallel "${PARALLEL_N}" --execute-command "${EXEC_CMD}" --full-path "${FULL_PATH}"
-		--params-file "${PARAMS_FILE}" --collection-json "${COLLECTION_JSON}" ${DRY_RUN:+--dry-run})
+	step_cmd=(bash "${DELEGATOR_SCRIPT}" --parallel "${PARALLEL_N}" --execute-command "${EXEC_CMD}" --full-path "${FULL_PATH}" --params-file "${PARAMS_FILE}" --collection-json "${COLLECTION_JSON}")
+	if [[ ${DRY_RUN} == true ]]; then
+		step_cmd+=("--dry-run")
+	fi
 	local rc
 	# shellcheck disable=SC2312
 	run_step "Phase 3/4: Experiment delegation" "$(phase_log 03-delegate.log)" "${step_cmd[@]}"
@@ -532,9 +535,7 @@ phase_collect() {
 	if [[ -n ${fe_path} ]]; then
 		step_cmd+=("--fe-path" "${fe_path}")
 	fi
-	if [[ ${DRY_RUN} == true ]]; then
-		step_cmd+=("--dry-run")
-	fi
+	if [[ ${DRY_RUN} == true ]]; then step_cmd+=("--dry-run"); fi
 	local rc
 	# shellcheck disable=SC2312
 	run_step "Phase 4/4: Results collection" "$(phase_log 04-collect.log)" "${step_cmd[@]}"

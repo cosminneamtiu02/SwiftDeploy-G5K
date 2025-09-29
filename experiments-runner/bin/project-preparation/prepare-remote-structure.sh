@@ -146,7 +146,9 @@ else
 	run_scp_to "${TMP_JSON}" "${CONFIG_JSON}"
 	run_scp_to "${TMP_WRITE_ENV}" "${ROOT_DIR}/bin/project-preparation/node-setup/write-env.sh"
 fi
-run_ssh "bash '${TMP_WRITE_ENV}' --json-file '${TMP_JSON}' ${DRY_RUN:+--dry-run}"
+opt_dry=""
+if [[ ${DRY_RUN} == true ]]; then opt_dry=" --dry-run"; fi
+run_ssh "bash '${TMP_WRITE_ENV}' --json-file '${TMP_JSON}'${opt_dry}"
 
 echo "[INFO] Skipping package installation (list_of_needed_libraries removed). Remote preparation complete."
 
