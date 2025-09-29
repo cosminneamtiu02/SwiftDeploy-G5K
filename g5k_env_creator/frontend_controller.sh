@@ -31,7 +31,13 @@ source "${CONFIG_PATH}"
 
 # -------- DERIVED VARIABLES (from sourced config) --------
 TAR_FILE="${HOME}/envs/${GENERAL_NAME}.tar.zst"
-YAML_FILE="${HOME}/${GENERAL_NAME}.yaml"
+# Directory where generated YAML files will be stored. Can be overridden by
+# setting YAML_OUTPUT_DIR in the environment before running this script.
+# Default is a repo-relative folder so generated YAMLs are kept together and
+# can be ignored from commits.
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+YAML_OUTPUT_DIR="${YAML_OUTPUT_DIR:-${REPO_ROOT}/experiments-runner/generated-yamls}"
+YAML_FILE="${YAML_OUTPUT_DIR}/${GENERAL_NAME}.yaml"
 LOCAL_SCRIPT_PATH="${NODE_SCRIPT_DIR}/${SETUP_SCRIPT}"
 
 # -------- PRE-CHECK 1: Clean up leftover node file if present --------
@@ -110,6 +116,18 @@ rm -f "${DEPLOYED_NODE_FILE}"
 
 # -------- STEP 6: Generate YAML --------
 echo "Generating ${YAML_FILE}..."
+# Ensure output directory exists and is writable
+if [[ ! -d ${YAML_OUTPUT_DIR} ]]; then
+	echo "Creating YAML output directory ${YAML_OUTPUT_DIR}..."
+	mkdir -p "${YAML_OUTPUT_DIR}"
+fi
+
+if [[ ! -w ${YAML_OUTPUT_DIR} ]]; then
+	echo "ERROR: YAML output directory ${YAML_OUTPUT_DIR} is not writable."
+	exit 1
+fi
+
+echo "Generating ${YAML_FILE}..."
 if ! kaenv3 -p "${OS_NAME}" -u deploy >"${YAML_FILE}"; then
 	echo "Failed to generate YAML environment file."
 	exit 1
@@ -121,6 +139,7 @@ sed -i "/^name:/c\name: ${YAML_NAME}" "${YAML_FILE}"
 sed -i "/^alias:/c\alias: ${YAML_ALIAS}" "${YAML_FILE}"
 sed -i "/^description:/c\description : ${YAML_DESCRIPTION}" "${YAML_FILE}"
 sed -i "/^author:/c\author: ${YAML_AUTHOR}" "${YAML_FILE}"
-sed -i "/^\s*file:/c\  file: /home/cneamtiu/envs/${GENERAL_NAME}.tar.zst" "${YAML_FILE}"
+# Update the file: entry to point to the actual TAR file path
+sed -i "/^\s*file:/c\  file: ${TAR_FILE}" "${YAML_FILE}"
 
 echo "Script finished successfully."
