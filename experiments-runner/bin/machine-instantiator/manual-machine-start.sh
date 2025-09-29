@@ -89,81 +89,73 @@ else
 	exit 2
 fi
 
-echo "[INFO] Waiting for node to reboot into deployed OS and become reachable..."
-WAIT_READY_TIMEOUT=${WAIT_READY_TIMEOUT:-420}
+echo "[INFO] Waiting for node to reboot into deployed OS and open SSH (port 22)..."
+WAIT_READY_TIMEOUT=${WAIT_READY_TIMEOUT:-600}
 WAIT_READY_INTERVAL=${WAIT_READY_INTERVAL:-5}
 deadline=$(($(date +%s) + WAIT_READY_TIMEOUT))
 while :; do
 	now=$(date +%s)
 	if ((now >= deadline)); then
-		echo "[ERROR] Timeout waiting for node to become reachable after kadeploy." >&2
-		exit 2
-	fi
-	# Try oarsh -t if job id is known, otherwise plain oarsh, then ssh
-	if command -v oarsh >/dev/null 2>&1 && [[ -n ${OAR_JOB_ID:-} ]]; then
-		if oarsh -t "${OAR_JOB_ID}" "${G5K_HOST}" 'true' 2>/dev/null; then
-			echo "[INFO] Node reachable via oarsh -t after deploy."
-			break
-		fi
-	fi
-	if command -v oarsh >/dev/null 2>&1; then
-		if oarsh "${G5K_HOST}" 'true' 2>/dev/null; then
-			echo "[INFO] Node reachable via oarsh after deploy."
-			break
-		fi
-	fi
-	if ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -i "${G5K_SSH_KEY}" "${G5K_USER}@${G5K_HOST}" 'true' 2>/dev/null; then
-		echo "[INFO] Node reachable via ssh after deploy."
+		echo "[ERROR] Timeout waiting for SSH port to open after kadeploy." >&2
+		# Don't exit immediately; proceed and let downstream steps attempt connections with richer logs
 		break
+	fi
+	if command -v nc >/dev/null 2>&1; then
+		if nc -z -w 3 "${G5K_HOST}" 22 2>/dev/null; then
+			echo "[INFO] SSH port 22 is open on ${G5K_HOST}."
+			break
+		fi
+	else
+		# Fallback to bash /dev/tcp probe
+		if timeout 3 bash -c ">/dev/tcp/${G5K_HOST}/22" 2>/dev/null; then
+			echo "[INFO] SSH port 22 is open on ${G5K_HOST}."
+			break
+		fi
 	fi
 	sleep "${WAIT_READY_INTERVAL}"
 done
 
-echo "[INFO] Checking connectivity to ${G5K_USER}@${G5K_HOST} ..."
+echo "[INFO] Checking connectivity to ${G5K_USER}@${G5K_HOST} (best-effort) ..."
 # Prefer oarsh when running inside an OAR job (partial allocations may block plain ssh).
 if command -v oarsh >/dev/null 2>&1 && [[ -n ${OAR_NODEFILE:-} || -n ${OAR_JOB_ID:-} ]]; then
 	if [[ -n ${OAR_JOB_ID:-} ]]; then
 		# Try oarsh with job tunnel first
-		if oarsh -t "${OAR_JOB_ID}" "${G5K_HOST}" true; then
+		if timeout 10 oarsh -t "${OAR_JOB_ID}" "${G5K_HOST}" true; then
 			echo "[INFO] Connectivity OK via: oarsh -t ${OAR_JOB_ID} ${G5K_HOST}"
 		else
 			echo "[WARN] oarsh -t ${OAR_JOB_ID} failed to reach ${G5K_HOST}. Trying plain oarsh..." >&2
-			if oarsh "${G5K_HOST}" true; then
+			if timeout 10 oarsh "${G5K_HOST}" true; then
 				echo "[INFO] Connectivity OK via: oarsh ${G5K_HOST}"
 			else
 				echo "[WARN] plain oarsh failed. Falling back to direct ssh..." >&2
-				if ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -i "${G5K_SSH_KEY}" "${G5K_USER}@${G5K_HOST}" true; then
+				if ssh -o ConnectTimeout=10 -o BatchMode=yes -o StrictHostKeyChecking=accept-new -i "${G5K_SSH_KEY}" "${G5K_USER}@${G5K_HOST}" true; then
 					echo "[INFO] Connectivity OK via: ssh ${G5K_USER}@${G5K_HOST}"
 				else
-					echo "[ERROR] Unable to connect to ${G5K_HOST} via oarsh (with/without -t) or ssh." >&2
-					echo "Hint: Ensure your interactive job is active (oarsub -I -t deploy -q default) and the node is reachable from the FE." >&2
-					exit 2
+					echo "[WARN] Unable to connect to ${G5K_HOST} via oarsh (with/without -t) or ssh right now." >&2
+					echo "      Downstream steps will retry using oarsh/oarcp." >&2
 				fi
 			fi
 		fi
 	else
 		# Inside an OAR context without explicit job id; try plain oarsh then ssh
-		if oarsh "${G5K_HOST}" true; then
+		if timeout 10 oarsh "${G5K_HOST}" true; then
 			echo "[INFO] Connectivity OK via: oarsh ${G5K_HOST}"
 		else
 			echo "[WARN] plain oarsh failed. Falling back to direct ssh..." >&2
-			if ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -i "${G5K_SSH_KEY}" "${G5K_USER}@${G5K_HOST}" true; then
+			if ssh -o ConnectTimeout=10 -o BatchMode=yes -o StrictHostKeyChecking=accept-new -i "${G5K_SSH_KEY}" "${G5K_USER}@${G5K_HOST}" true; then
 				echo "[INFO] Connectivity OK via: ssh ${G5K_USER}@${G5K_HOST}"
 			else
-				echo "[ERROR] Unable to connect to ${G5K_HOST} via oarsh or ssh." >&2
-				exit 2
+				echo "[WARN] Unable to connect to ${G5K_HOST} via oarsh or ssh right now. Continuing..." >&2
 			fi
 		fi
 	fi
 else
 	# No oarsh context; try direct ssh
-	if ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -i "${G5K_SSH_KEY}" "${G5K_USER}@${G5K_HOST}" true; then
+	if ssh -o ConnectTimeout=10 -o BatchMode=yes -o StrictHostKeyChecking=accept-new -i "${G5K_SSH_KEY}" "${G5K_USER}@${G5K_HOST}" true; then
 		echo "[INFO] Connectivity OK via: ssh ${G5K_USER}@${G5K_HOST}"
 	else
-		echo "[ERROR] Unable to SSH to ${G5K_USER}@${G5K_HOST}" >&2
-		echo "Hint: If the node isn't fully allocated, keep the interactive job open: oarsub -I -t deploy -q default" >&2
-		exit 2
+		echo "[WARN] Unable to SSH to ${G5K_USER}@${G5K_HOST}. Continuing..." >&2
 	fi
 fi
 
-echo "[INFO] Manual machine instantiation verified."
+echo "[INFO] Manual machine instantiation completed (deploy done; connectivity probes attempted)."
