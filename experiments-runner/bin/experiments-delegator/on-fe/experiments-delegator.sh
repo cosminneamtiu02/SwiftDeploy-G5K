@@ -127,6 +127,21 @@ REMOTE_BOOTSTRAP="${REMOTE_BASE}/on-machine/bootstrap"
 REMOTE_CMDS="${REMOTE_BOOTSTRAP}/commands.pending"
 REMOTE_LOGS="${REMOTE_BASE}/on-machine/logs"
 
+# Common SSH helpers (key-only auth, retries)
+# shellcheck source=../utils/libremote.sh
+# shellcheck disable=SC1091
+source "${ROOT_DIR}/bin/utils/libremote.sh"
+# Fallback for shellcheck/when not sourced: define SSH_OPTS_BASE if unset
+if [[ -z ${SSH_OPTS_BASE+set} ]]; then
+	SSH_OPTS_BASE=(
+		-o "BatchMode=yes"
+		-o "StrictHostKeyChecking=accept-new"
+		-o "PreferredAuthentications=publickey"
+		-o "PasswordAuthentication=no"
+		-o "KbdInteractiveAuthentication=no"
+	)
+fi
+
 if [[ ${DRY_RUN} == true ]]; then
 	echo "[DRY-RUN] Would upload commands to ${REMOTE_CMDS} and call run-batch"
 	cat "${TMP_CMDS_LOCAL}"
@@ -135,65 +150,26 @@ if [[ ${DRY_RUN} == true ]]; then
 fi
 
 echo "[INFO] Uploading commands list to remote: ${REMOTE_CMDS}"
-if command -v oarsh >/dev/null 2>&1 && [[ -n ${OAR_NODEFILE:-} || -n ${OAR_JOB_ID:-} ]]; then
-	if [[ -n ${OAR_JOB_ID:-} ]]; then
-		oarsh -t "${OAR_JOB_ID}" "${G5K_HOST}" "mkdir -p '${REMOTE_BOOTSTRAP}' '${REMOTE_LOGS}'"
-		oarcp -t "${OAR_JOB_ID}" "${TMP_CMDS_LOCAL}" "${G5K_HOST}:${REMOTE_CMDS}"
-	else
-		oarsh "${G5K_HOST}" "mkdir -p '${REMOTE_BOOTSTRAP}' '${REMOTE_LOGS}'"
-		oarcp "${TMP_CMDS_LOCAL}" "${G5K_HOST}:${REMOTE_CMDS}"
-	fi
-else
-	ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o PreferredAuthentications=publickey -o PasswordAuthentication=no -o KbdInteractiveAuthentication=no -i "${G5K_SSH_KEY}" "${G5K_USER}@${G5K_HOST}" "mkdir -p '${REMOTE_BOOTSTRAP}' '${REMOTE_LOGS}'"
-	scp -o BatchMode=yes -o StrictHostKeyChecking=accept-new -i "${G5K_SSH_KEY}" "${TMP_CMDS_LOCAL}" "${G5K_USER}@${G5K_HOST}:${REMOTE_CMDS}"
-fi
+ssh_retry "${G5K_USER}" "${G5K_HOST}" "${G5K_SSH_KEY}" "mkdir -p '${REMOTE_BOOTSTRAP}' '${REMOTE_LOGS}'"
+scp_to_retry "${G5K_USER}" "${G5K_HOST}" "${G5K_SSH_KEY}" "${TMP_CMDS_LOCAL}" "${REMOTE_CMDS}"
 
 echo "[INFO] Triggering remote batch runner"
-if command -v oarsh >/dev/null 2>&1 && [[ -n ${OAR_NODEFILE:-} || -n ${OAR_JOB_ID:-} ]]; then
-	if [[ -n ${OAR_JOB_ID:-} ]]; then
-		oarsh -t "${OAR_JOB_ID}" "${G5K_HOST}" \
-			"bash '${REMOTE_BASE}/on-machine/run-batch.sh' --full-path '${FULL_PATH}' --commands-file '${REMOTE_CMDS}' --parallel '${PARALLEL}'"
-	else
-		oarsh "${G5K_HOST}" \
-			"bash '${REMOTE_BASE}/on-machine/run-batch.sh' --full-path '${FULL_PATH}' --commands-file '${REMOTE_CMDS}' --parallel '${PARALLEL}'"
-	fi
-else
-	ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o PreferredAuthentications=publickey -o PasswordAuthentication=no -o KbdInteractiveAuthentication=no -i "${G5K_SSH_KEY}" "${G5K_USER}@${G5K_HOST}" \
-		"bash '${REMOTE_BASE}/on-machine/run-batch.sh' --full-path '${FULL_PATH}' --commands-file '${REMOTE_CMDS}' --parallel '${PARALLEL}'"
-fi
+ssh_retry "${G5K_USER}" "${G5K_HOST}" "${G5K_SSH_KEY}" \
+	"bash '${REMOTE_BASE}/on-machine/run-batch.sh' --full-path '${FULL_PATH}' --commands-file '${REMOTE_CMDS}' --parallel '${PARALLEL}'"
 
 echo "[INFO] Remote batch started."
 
 # Optional live log streaming loop while commands run
 if [[ ${STREAM} == true ]]; then
 	echo "[INFO] Streaming remote logs (Ctrl-C to stop streaming; job will continue)"
-	if command -v oarsh >/dev/null 2>&1 && [[ -n ${OAR_NODEFILE:-} || -n ${OAR_JOB_ID:-} ]]; then
-		if [[ -n ${OAR_JOB_ID:-} ]]; then
-			oarsh -t "${OAR_JOB_ID}" "${G5K_HOST}" \
-				"bash -lc 'mkdir -p \"${REMOTE_LOGS}\"; touch \"${REMOTE_LOGS}/stream.marker\"; tail -F \"${REMOTE_LOGS}\"/*.out \"${REMOTE_LOGS}\"/*.err 2>/dev/null'" || true
-		else
-			oarsh "${G5K_HOST}" \
-				"bash -lc 'mkdir -p \"${REMOTE_LOGS}\"; touch \"${REMOTE_LOGS}/stream.marker\"; tail -F \"${REMOTE_LOGS}\"/*.out \"${REMOTE_LOGS}\"/*.err 2>/dev/null'" || true
-		fi
-	else
-		ssh -t -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o PreferredAuthentications=publickey -o PasswordAuthentication=no -o KbdInteractiveAuthentication=no -i "${G5K_SSH_KEY}" "${G5K_USER}@${G5K_HOST}" \
-			"bash -lc 'mkdir -p \"${REMOTE_LOGS}\"; touch \"${REMOTE_LOGS}/stream.marker\"; tail -F \"${REMOTE_LOGS}\"/*.out \"${REMOTE_LOGS}\"/*.err 2>/dev/null'" || true
-	fi
+	# Use a single interactive ssh for streaming; do not wrap with retries to avoid duplicate tails
+	ssh "${SSH_OPTS_BASE[@]}" -t -i "${G5K_SSH_KEY}" "${G5K_USER}@${G5K_HOST}" \
+		"bash -lc 'mkdir -p \"${REMOTE_LOGS}\"; touch \"${REMOTE_LOGS}/stream.marker\"; tail -F \"${REMOTE_LOGS}\"/*.out \"${REMOTE_LOGS}\"/*.err 2>/dev/null'" || true
 fi
 
 echo "[INFO] Waiting for remote batch to complete..."
-if command -v oarsh >/dev/null 2>&1 && [[ -n ${OAR_NODEFILE:-} || -n ${OAR_JOB_ID:-} ]]; then
-	if [[ -n ${OAR_JOB_ID:-} ]]; then
-		oarsh -t "${OAR_JOB_ID}" "${G5K_HOST}" \
-			"bash -lc 'while pgrep -af run-batch.sh >/dev/null; do sleep 2; done'" || true
-	else
-		oarsh "${G5K_HOST}" \
-			"bash -lc 'while pgrep -af run-batch.sh >/dev/null; do sleep 2; done'" || true
-	fi
-else
-	ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o PreferredAuthentications=publickey -o PasswordAuthentication=no -o KbdInteractiveAuthentication=no -i "${G5K_SSH_KEY}" "${G5K_USER}@${G5K_HOST}" \
-		"bash -lc 'while pgrep -af run-batch.sh >/dev/null; do sleep 2; done'" || true
-fi
+ssh_retry "${G5K_USER}" "${G5K_HOST}" "${G5K_SSH_KEY}" \
+	"bash -lc 'while pgrep -af run-batch.sh >/dev/null; do sleep 2; done'" || true
 
 echo "[INFO] Remote batch completed."
 
@@ -210,18 +186,8 @@ fi
 
 if [[ -n ${strategy} && -n ${machine_path} && -n ${fe_path} ]]; then
 	echo "[INFO] Triggering collection: ${strategy}"
-	if command -v oarsh >/dev/null 2>&1 && [[ -n ${OAR_NODEFILE:-} || -n ${OAR_JOB_ID:-} ]]; then
-		if [[ -n ${OAR_JOB_ID:-} ]]; then
-			oarsh -t "${OAR_JOB_ID}" "${G5K_HOST}" \
-				"bash -lc '${REMOTE_BASE}/on-machine/collection/${strategy} --machine-path \"${machine_path}\" --fe-path \"${fe_path}\"'"
-		else
-			oarsh "${G5K_HOST}" \
-				"bash -lc '${REMOTE_BASE}/on-machine/collection/${strategy} --machine-path \"${machine_path}\" --fe-path \"${fe_path}\"'"
-		fi
-	else
-		ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o PreferredAuthentications=publickey -o PasswordAuthentication=no -o KbdInteractiveAuthentication=no -i "${G5K_SSH_KEY}" "${G5K_USER}@${G5K_HOST}" \
-			"bash -lc '${REMOTE_BASE}/on-machine/collection/${strategy} --machine-path \"${machine_path}\" --fe-path \"${fe_path}\"'"
-	fi
+	ssh_retry "${G5K_USER}" "${G5K_HOST}" "${G5K_SSH_KEY}" \
+		"bash -lc '${REMOTE_BASE}/on-machine/collection/${strategy} --machine-path \"${machine_path}\" --fe-path \"${fe_path}\"'"
 else
 	echo "[INFO] No collection triggered (strategy or paths missing)."
 fi

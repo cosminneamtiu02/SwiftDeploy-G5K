@@ -76,6 +76,11 @@ command -v jq >/dev/null 2>&1 || {
 	exit 2
 }
 
+# Common SSH helpers (key-only auth, retries)
+# shellcheck source=../utils/libremote.sh
+# shellcheck disable=SC1091
+source "${ROOT_DIR}/bin/utils/libremote.sh"
+
 REMOTE_BASE="${HOME}/experiments_node"
 REMOTE_ONM="${REMOTE_BASE}/on-machine"
 REMOTE_BOOTSTRAP="${REMOTE_ONM}/bootstrap"
@@ -89,16 +94,7 @@ run_ssh() {
 		echo "[DRY-RUN] remote: $*"
 		return 0
 	fi
-	if command -v oarsh >/dev/null 2>&1 && [[ -n ${OAR_NODEFILE:-} || -n ${OAR_JOB_ID:-} ]]; then
-		# If OAR_JOB_ID is set (FE-side), force tunnel with -t to the job; otherwise, inside job plain oarsh works
-		if [[ -n ${OAR_JOB_ID:-} ]]; then
-			oarsh -t "${OAR_JOB_ID}" "${G5K_HOST}" "$*"
-		else
-			oarsh "${G5K_HOST}" "$*"
-		fi
-	else
-		ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o PreferredAuthentications=publickey -o PasswordAuthentication=no -o KbdInteractiveAuthentication=no -i "${G5K_SSH_KEY}" "${G5K_USER}@${G5K_HOST}" "$*"
-	fi
+	ssh_retry "${G5K_USER}" "${G5K_HOST}" "${G5K_SSH_KEY}" "$*"
 }
 
 run_scp_to() {
@@ -108,16 +104,7 @@ run_scp_to() {
 		echo "[DRY-RUN] copy -> ${G5K_HOST}:${dest} : $*"
 		return 0
 	fi
-	if command -v oarcp >/dev/null 2>&1 && [[ -n ${OAR_NODEFILE:-} || -n ${OAR_JOB_ID:-} ]]; then
-		# oarcp relies on OAR tunnel; when FE-side with OAR_JOB_ID set, pass -t
-		if [[ -n ${OAR_JOB_ID:-} ]]; then
-			oarcp -t "${OAR_JOB_ID}" -r "$@" "${G5K_HOST}:${dest}"
-		else
-			oarcp -r "$@" "${G5K_HOST}:${dest}"
-		fi
-	else
-		scp -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o PreferredAuthentications=publickey -o PasswordAuthentication=no -o KbdInteractiveAuthentication=no -i "${G5K_SSH_KEY}" -r "$@" "${G5K_USER}@${G5K_HOST}:${dest}"
-	fi
+	scp_to_retry "${G5K_USER}" "${G5K_HOST}" "${G5K_SSH_KEY}" "$@" "${dest}"
 }
 
 echo "[INFO] Creating remote directories under ${REMOTE_BASE}"
