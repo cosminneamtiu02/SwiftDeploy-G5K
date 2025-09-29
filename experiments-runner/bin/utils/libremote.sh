@@ -4,7 +4,7 @@ set -Eeuo pipefail
 IFS=$'\n\t'
 
 SSH_RETRIES=${SSH_RETRIES:-3}
-SSH_OPTS_BASE=(-o BatchMode=yes -o StrictHostKeyChecking=accept-new)
+SSH_OPTS_BASE=(-o "BatchMode=yes" -o "StrictHostKeyChecking=accept-new")
 
 ssh_retry() {
 	# usage: ssh_retry user host key "command..."
