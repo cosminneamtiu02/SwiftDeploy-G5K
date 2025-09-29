@@ -69,10 +69,19 @@ if [[ ! -f ${G5K_SSH_KEY} ]]; then
 	exit 1
 fi
 
-echo "[INFO] Checking SSH connectivity to ${G5K_USER}@${G5K_HOST} ..."
-if ! ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -i "${G5K_SSH_KEY}" "${G5K_USER}@${G5K_HOST}" true; then
-	echo "[ERROR] Unable to SSH to ${G5K_USER}@${G5K_HOST}" >&2
-	exit 2
+echo "[INFO] Checking connectivity to ${G5K_USER}@${G5K_HOST} ..."
+# Prefer oarsh when running inside an OAR job (partial allocations may block plain ssh).
+if command -v oarsh >/dev/null 2>&1 && [[ -n ${OAR_NODEFILE:-} || -n ${OAR_JOB_ID:-} ]]; then
+	if ! oarsh "${G5K_HOST}" true; then
+		echo "[ERROR] Unable to connect with oarsh to ${G5K_HOST}" >&2
+		exit 2
+	fi
+else
+	if ! ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -i "${G5K_SSH_KEY}" "${G5K_USER}@${G5K_HOST}" true; then
+		echo "[ERROR] Unable to SSH to ${G5K_USER}@${G5K_HOST}" >&2
+		echo "Hint: If the node isn't fully allocated, reserve a whole node (oarsub -I -l nodes=1,walltime=...) or use oarsh/oarcp."
+		exit 2
+	fi
 fi
 
 echo "[INFO] Manual machine instantiation verified."

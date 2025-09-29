@@ -1,5 +1,0 @@
-[DRY-RUN] bash
-/home/cosmin/proiecte/SwiftDeploy-G5K/experiments-runner/bin/experiments-collector/on-machine/csnn_collection.sh
---machine-path /ABSOLUTE/MACHINE/PATH/results/csnn
---fe-path /ABSOLUTE/FE/PATH/results/csnn
---dry-run

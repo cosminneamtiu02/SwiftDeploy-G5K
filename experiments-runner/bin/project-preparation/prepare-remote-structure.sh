@@ -62,6 +62,11 @@ for v in G5K_USER G5K_HOST G5K_SSH_KEY; do
 	fi
 done
 
+# Assert variables for static analyzers (shellcheck) and make intent explicit
+: "${G5K_USER:?}"
+: "${G5K_HOST:?}"
+: "${G5K_SSH_KEY:?}"
+
 [[ -f ${CONFIG_JSON} ]] || {
 	echo "[ERROR] config not found: ${CONFIG_JSON}" >&2
 	exit 2
@@ -81,20 +86,12 @@ REMOTE_COLLECTION="${REMOTE_ONM}/collection"
 
 run_ssh() {
 	if [[ ${DRY_RUN} == true ]]; then
-		if [[ -z ${G5K_USER:-} ]]; then
-			echo "G5K_USER is not set" >&2
-			exit 1
-		fi
-		if [[ -z ${G5K_HOST:-} ]]; then
-			echo "G5K_HOST is not set" >&2
-			exit 1
-		fi
-		echo "[DRY-RUN] ssh ${G5K_USER}@${G5K_HOST}: $*"
+		echo "[DRY-RUN] remote: $*"
+		return 0
+	fi
+	if command -v oarsh >/dev/null 2>&1 && [[ -n ${OAR_NODEFILE:-} || -n ${OAR_JOB_ID:-} ]]; then
+		oarsh "${G5K_HOST}" "$*"
 	else
-		if [[ -z ${G5K_SSH_KEY:-} ]]; then
-			echo "G5K_SSH_KEY is not set" >&2
-			exit 1
-		fi
 		ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -i "${G5K_SSH_KEY}" "${G5K_USER}@${G5K_HOST}" "$*"
 	fi
 }
@@ -103,7 +100,12 @@ run_scp_to() {
 	local dest="$1"
 	shift
 	if [[ ${DRY_RUN} == true ]]; then
-		echo "[DRY-RUN] scp -> ${G5K_USER}@${G5K_HOST}:${dest} : $*"
+		echo "[DRY-RUN] copy -> ${G5K_HOST}:${dest} : $*"
+		return 0
+	fi
+	if command -v oarcp >/dev/null 2>&1 && [[ -n ${OAR_NODEFILE:-} || -n ${OAR_JOB_ID:-} ]]; then
+		# oarcp doesn't support -i key; relies on OAR tunnel
+		oarcp -r "$@" "${G5K_HOST}:${dest}"
 	else
 		scp -o BatchMode=yes -o StrictHostKeyChecking=accept-new -i "${G5K_SSH_KEY}" -r "$@" "${G5K_USER}@${G5K_HOST}:${dest}"
 	fi

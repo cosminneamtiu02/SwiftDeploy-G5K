@@ -135,37 +135,45 @@ if [[ ${DRY_RUN} == true ]]; then
 fi
 
 echo "[INFO] Uploading commands list to remote: ${REMOTE_CMDS}"
-if [[ -z ${G5K_SSH_KEY:-} ]]; then
-	echo "G5K_SSH_KEY is not set" >&2
-	exit 1
+if command -v oarsh >/dev/null 2>&1 && [[ -n ${OAR_NODEFILE:-} || -n ${OAR_JOB_ID:-} ]]; then
+	oarsh "${G5K_HOST}" "mkdir -p '${REMOTE_BOOTSTRAP}' '${REMOTE_LOGS}'"
+	oarcp "${TMP_CMDS_LOCAL}" "${G5K_HOST}:${REMOTE_CMDS}"
+else
+	ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -i "${G5K_SSH_KEY}" "${G5K_USER}@${G5K_HOST}" "mkdir -p '${REMOTE_BOOTSTRAP}' '${REMOTE_LOGS}'"
+	scp -o BatchMode=yes -o StrictHostKeyChecking=accept-new -i "${G5K_SSH_KEY}" "${TMP_CMDS_LOCAL}" "${G5K_USER}@${G5K_HOST}:${REMOTE_CMDS}"
 fi
-if [[ -z ${G5K_USER:-} ]]; then
-	echo "G5K_USER is not set" >&2
-	exit 1
-fi
-if [[ -z ${G5K_HOST:-} ]]; then
-	echo "G5K_HOST is not set" >&2
-	exit 1
-fi
-ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -i "${G5K_SSH_KEY}" "${G5K_USER}@${G5K_HOST}" "mkdir -p '${REMOTE_BOOTSTRAP}' '${REMOTE_LOGS}'"
-scp -o BatchMode=yes -o StrictHostKeyChecking=accept-new -i "${G5K_SSH_KEY}" "${TMP_CMDS_LOCAL}" "${G5K_USER}@${G5K_HOST}:${REMOTE_CMDS}"
 
 echo "[INFO] Triggering remote batch runner"
-ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -i "${G5K_SSH_KEY}" "${G5K_USER}@${G5K_HOST}" \
-	"bash '${REMOTE_BASE}/on-machine/run-batch.sh' --full-path '${FULL_PATH}' --commands-file '${REMOTE_CMDS}' --parallel '${PARALLEL}'"
+if command -v oarsh >/dev/null 2>&1 && [[ -n ${OAR_NODEFILE:-} || -n ${OAR_JOB_ID:-} ]]; then
+	oarsh "${G5K_HOST}" \
+		"bash '${REMOTE_BASE}/on-machine/run-batch.sh' --full-path '${FULL_PATH}' --commands-file '${REMOTE_CMDS}' --parallel '${PARALLEL}'"
+else
+	ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -i "${G5K_SSH_KEY}" "${G5K_USER}@${G5K_HOST}" \
+		"bash '${REMOTE_BASE}/on-machine/run-batch.sh' --full-path '${FULL_PATH}' --commands-file '${REMOTE_CMDS}' --parallel '${PARALLEL}'"
+fi
 
 echo "[INFO] Remote batch started."
 
 # Optional live log streaming loop while commands run
 if [[ ${STREAM} == true ]]; then
 	echo "[INFO] Streaming remote logs (Ctrl-C to stop streaming; job will continue)"
-	ssh -t -o BatchMode=yes -o StrictHostKeyChecking=accept-new -i "${G5K_SSH_KEY}" "${G5K_USER}@${G5K_HOST}" \
-		"bash -lc 'mkdir -p \"${REMOTE_LOGS}\"; touch \"${REMOTE_LOGS}/stream.marker\"; tail -F \"${REMOTE_LOGS}\"/*.out \"${REMOTE_LOGS}\"/*.err 2>/dev/null'" || true
+	if command -v oarsh >/dev/null 2>&1 && [[ -n ${OAR_NODEFILE:-} || -n ${OAR_JOB_ID:-} ]]; then
+		oarsh -t "${G5K_HOST}" \
+			"bash -lc 'mkdir -p \"${REMOTE_LOGS}\"; touch \"${REMOTE_LOGS}/stream.marker\"; tail -F \"${REMOTE_LOGS}\"/*.out \"${REMOTE_LOGS}\"/*.err 2>/dev/null'" || true
+	else
+		ssh -t -o BatchMode=yes -o StrictHostKeyChecking=accept-new -i "${G5K_SSH_KEY}" "${G5K_USER}@${G5K_HOST}" \
+			"bash -lc 'mkdir -p \"${REMOTE_LOGS}\"; touch \"${REMOTE_LOGS}/stream.marker\"; tail -F \"${REMOTE_LOGS}\"/*.out \"${REMOTE_LOGS}\"/*.err 2>/dev/null'" || true
+	fi
 fi
 
 echo "[INFO] Waiting for remote batch to complete..."
-ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -i "${G5K_SSH_KEY}" "${G5K_USER}@${G5K_HOST}" \
-	"bash -lc 'while pgrep -af run-batch.sh >/dev/null; do sleep 2; done'" || true
+if command -v oarsh >/dev/null 2>&1 && [[ -n ${OAR_NODEFILE:-} || -n ${OAR_JOB_ID:-} ]]; then
+	oarsh "${G5K_HOST}" \
+		"bash -lc 'while pgrep -af run-batch.sh >/dev/null; do sleep 2; done'" || true
+else
+	ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -i "${G5K_SSH_KEY}" "${G5K_USER}@${G5K_HOST}" \
+		"bash -lc 'while pgrep -af run-batch.sh >/dev/null; do sleep 2; done'" || true
+fi
 
 echo "[INFO] Remote batch completed."
 
@@ -182,8 +190,13 @@ fi
 
 if [[ -n ${strategy} && -n ${machine_path} && -n ${fe_path} ]]; then
 	echo "[INFO] Triggering collection: ${strategy}"
-	ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -i "${G5K_SSH_KEY}" "${G5K_USER}@${G5K_HOST}" \
-		"bash -lc '${REMOTE_BASE}/on-machine/collection/${strategy} --machine-path \"${machine_path}\" --fe-path \"${fe_path}\"'"
+	if command -v oarsh >/dev/null 2>&1 && [[ -n ${OAR_NODEFILE:-} || -n ${OAR_JOB_ID:-} ]]; then
+		oarsh "${G5K_HOST}" \
+			"bash -lc '${REMOTE_BASE}/on-machine/collection/${strategy} --machine-path \"${machine_path}\" --fe-path \"${fe_path}\"'"
+	else
+		ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -i "${G5K_SSH_KEY}" "${G5K_USER}@${G5K_HOST}" \
+			"bash -lc '${REMOTE_BASE}/on-machine/collection/${strategy} --machine-path \"${machine_path}\" --fe-path \"${fe_path}\"'"
+	fi
 else
 	echo "[INFO] No collection triggered (strategy or paths missing)."
 fi
