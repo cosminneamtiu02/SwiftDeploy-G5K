@@ -248,6 +248,24 @@ IMAGE_TO_USE="$(json_or_empty '.machine_setup.image_to_use')"
 OS_TYPE="$(json_required '.machine_setup.os_distribution_type')"
 PKG_LIST_FILE="$(json_required '.machine_setup.list_of_needed_libraries')"
 
+# Resolve where generated image YAMLs live. Default is repo-relative
+# experiments-runner/generated-yamls but can be overridden by YAML_OUTPUT_DIR.
+YAML_LOOKUP_DIR="${YAML_OUTPUT_DIR:-${SCRIPT_DIR}/generated-yamls}"
+
+# If the config specifies an image YAML filename, require it to exist inside
+# the lookup dir and expose IMAGE_YAML_PATH with the absolute path. If not
+# present, fail fast with a clear error.
+IMAGE_YAML_PATH=""
+if [[ -n ${IMAGE_TO_USE:-} ]]; then
+	IMAGE_YAML_PATH="${YAML_LOOKUP_DIR}/${IMAGE_TO_USE}"
+	if [[ -f ${IMAGE_YAML_PATH} ]]; then
+		log_info "Using image YAML: ${IMAGE_YAML_PATH}"
+	else
+		log_err "Image YAML not found: ${IMAGE_TO_USE}. Searched in: ${YAML_LOOKUP_DIR}"
+		exit 2
+	fi
+fi
+
 PARAMS_FILE="$(json_required '.running_experiments.on_fe.to_do_parameters_list_path')"
 EXEC_CMD="$(json_required '.running_experiments.on_machine.execute_command')"
 FULL_PATH="$(json_required '.running_experiments.on_machine.full_path_to_executable')"
