@@ -97,7 +97,7 @@ run_ssh() {
 			oarsh "${G5K_HOST}" "$*"
 		fi
 	else
-		ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -i "${G5K_SSH_KEY}" "${G5K_USER}@${G5K_HOST}" "$*"
+		ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o PreferredAuthentications=publickey -o PasswordAuthentication=no -o KbdInteractiveAuthentication=no -i "${G5K_SSH_KEY}" "${G5K_USER}@${G5K_HOST}" "$*"
 	fi
 }
 
@@ -116,7 +116,7 @@ run_scp_to() {
 			oarcp -r "$@" "${G5K_HOST}:${dest}"
 		fi
 	else
-		scp -o BatchMode=yes -o StrictHostKeyChecking=accept-new -i "${G5K_SSH_KEY}" -r "$@" "${G5K_USER}@${G5K_HOST}:${dest}"
+		scp -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o PreferredAuthentications=publickey -o PasswordAuthentication=no -o KbdInteractiveAuthentication=no -i "${G5K_SSH_KEY}" -r "$@" "${G5K_USER}@${G5K_HOST}:${dest}"
 	fi
 }
 

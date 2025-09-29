@@ -63,6 +63,33 @@ if [[ ! -f ${G5K_SSH_KEY} ]]; then
 	exit 1
 fi
 
+# Ensure authorized_keys contains the matching public key before kadeploy so the node accepts our key
+if [[ ${SKIP_SSH_KEY_MANAGEMENT:-false} != true ]]; then
+	mkdir -p "${HOME}/.ssh"
+	chmod 700 "${HOME}/.ssh"
+	pubkey_file="${G5K_SSH_KEY}.pub"
+	if [[ ! -f ${pubkey_file} ]]; then
+		# Try to derive the public key (ssh-keygen -y) if .pub is missing
+		if command -v ssh-keygen >/dev/null 2>&1; then
+			ssh-keygen -y -f "${G5K_SSH_KEY}" >"${pubkey_file}"
+		else
+			echo "[WARN] ssh-keygen not found; cannot derive public key for ${G5K_SSH_KEY}" >&2
+		fi
+	fi
+	if [[ -f ${pubkey_file} ]]; then
+		touch "${HOME}/.ssh/authorized_keys"
+		chmod 600 "${HOME}/.ssh/authorized_keys"
+		# Append if not already present (match full line)
+		if ! grep -F -q -f "${pubkey_file}" "${HOME}/.ssh/authorized_keys"; then
+			echo "[INFO] Adding public key to authorized_keys for deployment"
+			cat "${pubkey_file}" >>"${HOME}/.ssh/authorized_keys"
+		fi
+		chmod 600 "${pubkey_file}" 2>/dev/null || true # keep it private if exists locally
+	else
+		echo "[WARN] Public key not found for ${G5K_SSH_KEY}; continuing, but SSH may fail on node." >&2
+	fi
+fi
+
 # Require an image YAML to deploy
 if [[ -z ${IMAGE_YAML_PATH:-} ]]; then
 	echo "[ERROR] IMAGE_YAML_PATH is not set. Upstream controller should export it after resolving image_to_use." >&2
@@ -151,7 +178,7 @@ if command -v oarsh >/dev/null 2>&1 && [[ -n ${OAR_NODEFILE:-} || -n ${OAR_JOB_I
 				echo "[INFO] Connectivity OK via: oarsh ${G5K_HOST}"
 			else
 				echo "[WARN] plain oarsh failed. Falling back to direct ssh..." >&2
-				if ssh -o ConnectTimeout=10 -o BatchMode=yes -o StrictHostKeyChecking=accept-new -i "${G5K_SSH_KEY}" "${G5K_USER}@${G5K_HOST}" true; then
+				if ssh -o ConnectTimeout=10 -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o PreferredAuthentications=publickey -o PasswordAuthentication=no -o KbdInteractiveAuthentication=no -i "${G5K_SSH_KEY}" "${G5K_USER}@${G5K_HOST}" true; then
 					echo "[INFO] Connectivity OK via: ssh ${G5K_USER}@${G5K_HOST}"
 				else
 					echo "[WARN] Unable to connect to ${G5K_HOST} via oarsh (with/without -t) or ssh right now." >&2
@@ -169,7 +196,7 @@ if command -v oarsh >/dev/null 2>&1 && [[ -n ${OAR_NODEFILE:-} || -n ${OAR_JOB_I
 			echo "[INFO] Connectivity OK via: oarsh ${G5K_HOST}"
 		else
 			echo "[WARN] plain oarsh failed. Falling back to direct ssh..." >&2
-			if ssh -o ConnectTimeout=10 -o BatchMode=yes -o StrictHostKeyChecking=accept-new -i "${G5K_SSH_KEY}" "${G5K_USER}@${G5K_HOST}" true; then
+			if ssh -o ConnectTimeout=10 -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o PreferredAuthentications=publickey -o PasswordAuthentication=no -o KbdInteractiveAuthentication=no -i "${G5K_SSH_KEY}" "${G5K_USER}@${G5K_HOST}" true; then
 				echo "[INFO] Connectivity OK via: ssh ${G5K_USER}@${G5K_HOST}"
 			else
 				echo "[WARN] Unable to connect to ${G5K_HOST} via oarsh or ssh right now. Continuing..." >&2
@@ -181,7 +208,7 @@ if command -v oarsh >/dev/null 2>&1 && [[ -n ${OAR_NODEFILE:-} || -n ${OAR_JOB_I
 	fi
 else
 	# No oarsh context; try direct ssh
-	if ssh -o ConnectTimeout=10 -o BatchMode=yes -o StrictHostKeyChecking=accept-new -i "${G5K_SSH_KEY}" "${G5K_USER}@${G5K_HOST}" true; then
+	if ssh -o ConnectTimeout=10 -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o PreferredAuthentications=publickey -o PasswordAuthentication=no -o KbdInteractiveAuthentication=no -i "${G5K_SSH_KEY}" "${G5K_USER}@${G5K_HOST}" true; then
 		echo "[INFO] Connectivity OK via: ssh ${G5K_USER}@${G5K_HOST}"
 	else
 		echo "[WARN] Unable to SSH to ${G5K_USER}@${G5K_HOST}. Continuing..." >&2

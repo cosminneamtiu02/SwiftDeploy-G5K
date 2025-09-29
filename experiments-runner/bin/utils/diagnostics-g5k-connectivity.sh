@@ -66,7 +66,7 @@ JID="${OAR_JOB_ID:-}"
 	echo "--- ssh -vvv banner/auth test (10s) ---"
 	(
 		set -x
-		ssh -vvv -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new "${G5K_USER:-${USER}}@${HOST}" 'echo OK_ssh && hostname && id'
+		ssh -vvv -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new -o PreferredAuthentications=publickey -o PasswordAuthentication=no -o KbdInteractiveAuthentication=no "${G5K_USER:-${USER}}@${HOST}" 'echo OK_ssh && hostname && id'
 	) || echo "ssh failed"
 	echo
 

@@ -144,7 +144,7 @@ if command -v oarsh >/dev/null 2>&1 && [[ -n ${OAR_NODEFILE:-} || -n ${OAR_JOB_I
 		oarcp "${TMP_CMDS_LOCAL}" "${G5K_HOST}:${REMOTE_CMDS}"
 	fi
 else
-	ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -i "${G5K_SSH_KEY}" "${G5K_USER}@${G5K_HOST}" "mkdir -p '${REMOTE_BOOTSTRAP}' '${REMOTE_LOGS}'"
+	ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o PreferredAuthentications=publickey -o PasswordAuthentication=no -o KbdInteractiveAuthentication=no -i "${G5K_SSH_KEY}" "${G5K_USER}@${G5K_HOST}" "mkdir -p '${REMOTE_BOOTSTRAP}' '${REMOTE_LOGS}'"
 	scp -o BatchMode=yes -o StrictHostKeyChecking=accept-new -i "${G5K_SSH_KEY}" "${TMP_CMDS_LOCAL}" "${G5K_USER}@${G5K_HOST}:${REMOTE_CMDS}"
 fi
 
@@ -158,7 +158,7 @@ if command -v oarsh >/dev/null 2>&1 && [[ -n ${OAR_NODEFILE:-} || -n ${OAR_JOB_I
 			"bash '${REMOTE_BASE}/on-machine/run-batch.sh' --full-path '${FULL_PATH}' --commands-file '${REMOTE_CMDS}' --parallel '${PARALLEL}'"
 	fi
 else
-	ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -i "${G5K_SSH_KEY}" "${G5K_USER}@${G5K_HOST}" \
+	ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o PreferredAuthentications=publickey -o PasswordAuthentication=no -o KbdInteractiveAuthentication=no -i "${G5K_SSH_KEY}" "${G5K_USER}@${G5K_HOST}" \
 		"bash '${REMOTE_BASE}/on-machine/run-batch.sh' --full-path '${FULL_PATH}' --commands-file '${REMOTE_CMDS}' --parallel '${PARALLEL}'"
 fi
 
@@ -176,7 +176,7 @@ if [[ ${STREAM} == true ]]; then
 				"bash -lc 'mkdir -p \"${REMOTE_LOGS}\"; touch \"${REMOTE_LOGS}/stream.marker\"; tail -F \"${REMOTE_LOGS}\"/*.out \"${REMOTE_LOGS}\"/*.err 2>/dev/null'" || true
 		fi
 	else
-		ssh -t -o BatchMode=yes -o StrictHostKeyChecking=accept-new -i "${G5K_SSH_KEY}" "${G5K_USER}@${G5K_HOST}" \
+		ssh -t -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o PreferredAuthentications=publickey -o PasswordAuthentication=no -o KbdInteractiveAuthentication=no -i "${G5K_SSH_KEY}" "${G5K_USER}@${G5K_HOST}" \
 			"bash -lc 'mkdir -p \"${REMOTE_LOGS}\"; touch \"${REMOTE_LOGS}/stream.marker\"; tail -F \"${REMOTE_LOGS}\"/*.out \"${REMOTE_LOGS}\"/*.err 2>/dev/null'" || true
 	fi
 fi
@@ -191,7 +191,7 @@ if command -v oarsh >/dev/null 2>&1 && [[ -n ${OAR_NODEFILE:-} || -n ${OAR_JOB_I
 			"bash -lc 'while pgrep -af run-batch.sh >/dev/null; do sleep 2; done'" || true
 	fi
 else
-	ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -i "${G5K_SSH_KEY}" "${G5K_USER}@${G5K_HOST}" \
+	ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o PreferredAuthentications=publickey -o PasswordAuthentication=no -o KbdInteractiveAuthentication=no -i "${G5K_SSH_KEY}" "${G5K_USER}@${G5K_HOST}" \
 		"bash -lc 'while pgrep -af run-batch.sh >/dev/null; do sleep 2; done'" || true
 fi
 
@@ -219,7 +219,7 @@ if [[ -n ${strategy} && -n ${machine_path} && -n ${fe_path} ]]; then
 				"bash -lc '${REMOTE_BASE}/on-machine/collection/${strategy} --machine-path \"${machine_path}\" --fe-path \"${fe_path}\"'"
 		fi
 	else
-		ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -i "${G5K_SSH_KEY}" "${G5K_USER}@${G5K_HOST}" \
+		ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o PreferredAuthentications=publickey -o PasswordAuthentication=no -o KbdInteractiveAuthentication=no -i "${G5K_SSH_KEY}" "${G5K_USER}@${G5K_HOST}" \
 			"bash -lc '${REMOTE_BASE}/on-machine/collection/${strategy} --machine-path \"${machine_path}\" --fe-path \"${fe_path}\"'"
 	fi
 else
