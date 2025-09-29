@@ -179,6 +179,42 @@ check_dependencies() {
 
 check_dependencies
 
+# Auto-detect Grid'5000 connection variables if not provided by the user.
+# Prefer values from the current OAR interactive session when available.
+auto_detect_g5k_env() {
+	local changed=false
+	if [[ -z ${G5K_USER:-} ]]; then
+		G5K_USER="${USER:-$(whoami)}"
+		export G5K_USER
+		log_debug "Auto-detected G5K_USER=${G5K_USER}"
+		changed=true
+	fi
+	if [[ -z ${G5K_HOST:-} ]]; then
+		if [[ -n ${OAR_NODEFILE:-} && -f ${OAR_NODEFILE} ]]; then
+			G5K_HOST="$(head -n1 "${OAR_NODEFILE}")"
+			export G5K_HOST
+			log_debug "Auto-detected G5K_HOST from OAR_NODEFILE: ${G5K_HOST}"
+			changed=true
+		fi
+	fi
+	if [[ -z ${G5K_SSH_KEY:-} ]]; then
+		for cand in "${HOME}/.ssh/id_ed25519" "${HOME}/.ssh/id_rsa"; do
+			if [[ -f ${cand} ]]; then
+				G5K_SSH_KEY="${cand}"
+				export G5K_SSH_KEY
+				log_debug "Auto-detected G5K_SSH_KEY=${G5K_SSH_KEY}"
+				changed=true
+				break
+			fi
+		done
+	fi
+	if [[ ${changed} == true ]]; then
+		log_info "Using Grid'5000 connection: user=${G5K_USER:-?} host=${G5K_HOST:-?} key=${G5K_SSH_KEY:-?}"
+	fi
+}
+
+auto_detect_g5k_env
+
 # Resolve config
 CONFIG_JSON="${CONFIG_DIR_ABS}/${CONFIG_FILE_NAME}"
 [[ -f ${CONFIG_JSON} ]] || {

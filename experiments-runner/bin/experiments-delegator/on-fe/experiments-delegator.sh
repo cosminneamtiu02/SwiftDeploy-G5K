@@ -71,6 +71,25 @@ while [[ $# -gt 0 ]]; do
 	esac
 done
 
+# Auto-detect Grid'5000 env if not provided. Prefer OAR_NODEFILE and standard keys.
+if [[ -z ${G5K_USER:-} ]]; then
+	G5K_USER="${USER:-$(whoami)}"
+	export G5K_USER
+fi
+if [[ -z ${G5K_HOST:-} && -n ${OAR_NODEFILE:-} && -f ${OAR_NODEFILE} ]]; then
+	G5K_HOST="$(head -n1 "${OAR_NODEFILE}")"
+	export G5K_HOST
+fi
+if [[ -z ${G5K_SSH_KEY:-} ]]; then
+	for cand in "${HOME}/.ssh/id_ed25519" "${HOME}/.ssh/id_rsa"; do
+		if [[ -f ${cand} ]]; then
+			G5K_SSH_KEY="${cand}"
+			export G5K_SSH_KEY
+			break
+		fi
+	done
+fi
+
 for v in G5K_USER G5K_HOST G5K_SSH_KEY; do
 	: "${!v:?Environment variable ${v} is required}"
 done
