@@ -47,9 +47,9 @@ if [[ ${1:-} == "--help" ]]; then
 fi
 
 echo "[INFO] Manual instantiation selected. Please perform the following on Grid'5000:"
-echo "  1) Reserve nodes with oarsub and wait for allocation."
+echo "  1) On the FE, reserve nodes with oarsub and wait for allocation (this can be interactive or non-interactive)."
 echo "  2) Deploy the requested image (see machine_setup.image_to_use)."
-echo "  3) Export the environment variables so downstream scripts can reach the node:"
+echo "  3) Export the environment variables so downstream scripts can reach the node (from the FE you can use oarsh/oarcp with -t ${OAR_JOB_ID}):"
 echo "     export G5K_USER=your_user"
 echo "     export G5K_HOST=node-1.site.grid5000.fr"
 echo "     export G5K_SSH_KEY=~/.ssh/id_rsa"

@@ -90,7 +90,12 @@ run_ssh() {
 		return 0
 	fi
 	if command -v oarsh >/dev/null 2>&1 && [[ -n ${OAR_NODEFILE:-} || -n ${OAR_JOB_ID:-} ]]; then
-		oarsh "${G5K_HOST}" "$*"
+		# If OAR_JOB_ID is set (FE-side), force tunnel with -t to the job; otherwise, inside job plain oarsh works
+		if [[ -n ${OAR_JOB_ID:-} ]]; then
+			oarsh -t "${OAR_JOB_ID}" "${G5K_HOST}" "$*"
+		else
+			oarsh "${G5K_HOST}" "$*"
+		fi
 	else
 		ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -i "${G5K_SSH_KEY}" "${G5K_USER}@${G5K_HOST}" "$*"
 	fi
@@ -104,8 +109,12 @@ run_scp_to() {
 		return 0
 	fi
 	if command -v oarcp >/dev/null 2>&1 && [[ -n ${OAR_NODEFILE:-} || -n ${OAR_JOB_ID:-} ]]; then
-		# oarcp doesn't support -i key; relies on OAR tunnel
-		oarcp -r "$@" "${G5K_HOST}:${dest}"
+		# oarcp relies on OAR tunnel; when FE-side with OAR_JOB_ID set, pass -t
+		if [[ -n ${OAR_JOB_ID:-} ]]; then
+			oarcp -t "${OAR_JOB_ID}" -r "$@" "${G5K_HOST}:${dest}"
+		else
+			oarcp -r "$@" "${G5K_HOST}:${dest}"
+		fi
 	else
 		scp -o BatchMode=yes -o StrictHostKeyChecking=accept-new -i "${G5K_SSH_KEY}" -r "$@" "${G5K_USER}@${G5K_HOST}:${dest}"
 	fi
@@ -133,8 +142,9 @@ if [[ ${DRY_RUN} == true ]]; then
 	echo "[DRY-RUN] upload config to remote: ${CONFIG_JSON} -> ${TMP_JSON}"
 	echo "[DRY-RUN] upload write-env.sh to remote: ${TMP_WRITE_ENV}"
 else
-	scp -o BatchMode=yes -o StrictHostKeyChecking=accept-new -i "${G5K_SSH_KEY}" "${CONFIG_JSON}" "${G5K_USER}@${G5K_HOST}:${TMP_JSON}"
-	scp -o BatchMode=yes -o StrictHostKeyChecking=accept-new -i "${G5K_SSH_KEY}" "${ROOT_DIR}/bin/project-preparation/node-setup/write-env.sh" "${G5K_USER}@${G5K_HOST}:${TMP_WRITE_ENV}"
+	# Use the same copy helper to benefit from oarcp when in an OAR context
+	run_scp_to "${TMP_JSON}" "${CONFIG_JSON}"
+	run_scp_to "${TMP_WRITE_ENV}" "${ROOT_DIR}/bin/project-preparation/node-setup/write-env.sh"
 fi
 run_ssh "bash '${TMP_WRITE_ENV}' --json-file '${TMP_JSON}' ${DRY_RUN:+--dry-run}"
 
