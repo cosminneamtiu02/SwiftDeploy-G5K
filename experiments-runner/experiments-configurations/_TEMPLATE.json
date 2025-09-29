@@ -1,0 +1,20 @@
+{
+  "running_experiments": {
+    "on_fe": {
+      "to_do_parameters_list_path": "path/to/parameters.txt"
+    },
+    "on_machine": {
+      "execute_command": "./executable",
+      "full_path_to_executable": "/absolute/path/to/executable"
+    },
+    "number_of_experiments_to_run_in_parallel_on_machine": 1,
+    "experiments_collection": {}
+  },
+  "machine_setup": {
+    "image_to_use": "my_image.yaml",
+    "env_variables_list": [],
+    "is_machine_instantiator_manual": true,
+    "list_of_needed_libraries": "path/to/required-packages.txt",
+    "os_distribution_type": 1
+  }
+}
