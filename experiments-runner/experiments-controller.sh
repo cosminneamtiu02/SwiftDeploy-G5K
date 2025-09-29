@@ -246,7 +246,6 @@ fi
 
 IMAGE_TO_USE="$(json_or_empty '.machine_setup.image_to_use')"
 OS_TYPE="$(json_required '.machine_setup.os_distribution_type')"
-PKG_LIST_FILE="$(json_required '.machine_setup.list_of_needed_libraries')"
 
 # Resolve where generated image YAMLs live. Default is repo-relative
 # experiments-runner/generated-yamls but can be overridden by YAML_OUTPUT_DIR.
@@ -266,11 +265,28 @@ if [[ -n ${IMAGE_TO_USE:-} ]]; then
 	fi
 fi
 
-PARAMS_FILE="$(json_required '.running_experiments.on_fe.to_do_parameters_list_path')"
+# PARAMS_BASE: default base folder for relative params paths (repo-relative)
+# You can override by exporting PARAMS_BASE in the environment before running.
+PARAMS_BASE="${PARAMS_BASE:-${SCRIPT_DIR}/params}"
+
+# Resolve params path from config. If the configured path is absolute, use it
+# verbatim; if it's relative, resolve under PARAMS_BASE so projects can live
+# inside the repo (e.g. params/<project>/runs.txt).
+CONFIG_PARAM="$(json_required '.running_experiments.on_fe.to_do_parameters_list_path')"
+if [[ ${CONFIG_PARAM} == /* ]]; then
+	PARAMS_FILE="${CONFIG_PARAM}"
+else
+	PARAMS_FILE="${PARAMS_BASE%/}/${CONFIG_PARAM}"
+fi
 EXEC_CMD="$(json_required '.running_experiments.on_machine.execute_command')"
 FULL_PATH="$(json_required '.running_experiments.on_machine.full_path_to_executable')"
 PARALLEL_N="$(json_required '.running_experiments.number_of_experiments_to_run_in_parallel_on_machine')"
 COLLECTION_JSON="$(jq -c '.running_experiments.experiments_collection' "${CONFIG_JSON}")"
+
+# COLLECTED_BASE: where frontend-collected results live when config provides
+# a relative project path. Defaults to repo-relative `experiments-runner/collected`.
+# Override with COLLECTED_BASE env var if needed.
+COLLECTED_BASE="${COLLECTED_BASE:-${SCRIPT_DIR}/collected}"
 
 log_info "${BOLD}SwiftDeploy-G5K — Experiments Runner${RESET}"
 log_info "Config: ${CONFIG_JSON} (name: ${CONFIG_FILE_NAME})"
@@ -308,7 +324,7 @@ phase_prepare() {
 	fi
 	local step_cmd
 	step_cmd=(bash "${PREPARE_SCRIPT}"
-		--config "${CONFIG_JSON}" --os-type "${OS_TYPE}" --full-path "${FULL_PATH}" --packages-file "${PKG_LIST_FILE}" ${DRY_RUN:+--dry-run})
+		--config "${CONFIG_JSON}" --os-type "${OS_TYPE}" --full-path "${FULL_PATH}" ${DRY_RUN:+--dry-run})
 	local rc
 	# shellcheck disable=SC2312
 	run_step "Phase 2/4: Project preparation" "$(phase_log 02-prepare.log)" "${step_cmd[@]}"
@@ -350,8 +366,23 @@ phase_collect() {
 	# Extract paths if present; tolerate missing keys per TEMPLATE
 	local machine_path fe_path
 	machine_path="$(jq -r '.path_to_saved_experiment_results_on_machine // empty' <<<"${COLLECTION_JSON}")"
-	fe_path="$(jq -r '.path_to_save_experiment_results_on_fe // empty' <<<"${COLLECTION_JSON}")"
+	fe_path_raw="$(jq -r '.path_to_save_experiment_results_on_fe // empty' <<<"${COLLECTION_JSON}")"
+	# Resolve collected FE path: absolute paths used as-is; relative values are
+	# resolved under COLLECTED_BASE so config can specify just a project name.
+	if [[ -n ${fe_path_raw} ]]; then
+		if [[ ${fe_path_raw} == /* ]]; then
+			fe_path="${fe_path_raw}"
+		else
+			fe_path="${COLLECTED_BASE%/}/${fe_path_raw}"
+		fi
+	else
+		fe_path=""
+	fi
 	local step_cmd
+	# Ensure local collected path exists (unless dry-run)
+	if [[ -n ${fe_path} && ${DRY_RUN} != true ]]; then
+		mkdir -p "${fe_path}"
+	fi
 	step_cmd=(bash "${COLLECT_ONM_SCRIPT}"
 		${machine_path:+--machine-path "${machine_path}"} ${fe_path:+--fe-path "${fe_path}"} ${DRY_RUN:+--dry-run})
 	local rc

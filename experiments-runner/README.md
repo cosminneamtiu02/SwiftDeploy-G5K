@@ -130,8 +130,6 @@ Important fields (see `_TEMPLATE.json`):
   - `is_machine_instantiator_manual` (boolean). If absent but
     `is_machine_instantiator_automatic` exists, it is inverted with a warning.
   - `os_distribution_type` (int): 1=Debian/apt, 2=RHEL7/yum, 3=RHEL7+/dnf
-  - `list_of_needed_libraries` (string): path to a packages file on the machine
-    (will be uploaded to remote /tmp and installed)
   - `env_variables_list` (array of single-key objects): persisted via `write-env.sh`
 - `running_experiments.on_fe`
   - `to_do_parameters_list_path` (string): absolute path on FE with parameters
@@ -157,8 +155,8 @@ Tip: Start from `_TEMPLATE.json` and replace absolute paths and values.
 - prepare
   - Creates the remote tree under `~/experiments_node/on-machine/` and uploads
     `run-batch.sh` and collection scripts.
-  - Persists env vars with `write-env.sh` and installs packages via
-    `install-dependencies.sh` using the selected package manager.
+  - Persists env vars with `write-env.sh`. Package installation from config has
+    been removed; perform any dependency setup inside your image or manually.
 - delegate
   - `on-fe/experiments-delegator.sh` selects up to N TODO lines from the params file
     using a tracker `*_tracker.txt` (same folder).
@@ -206,10 +204,9 @@ Tip: Start from `_TEMPLATE.json` and replace absolute paths and values.
     and that the host is reachable from the FE.
 - Permission denied writing env
   - `write-env.sh` prefers `/etc/profile.d` if passwordless sudo is available; otherwise falls back to `~/.profile`.
-- Packages fail to install
-  - Confirm `os_distribution_type` matches the remote OS and
-    `list_of_needed_libraries` is accessible;
-    check remote `/tmp/install-deps_*.sh` logs.
+-- Packages fail to install
+  - Dependency installation is no longer driven by config. Ensure your image
+    contains the needed packages or run `install-dependencies.sh` manually.
 - No jobs selected (empty TODO)
   - Inspect your params file and `*_tracker.txt`; remove or edit the tracker to reschedule lines deliberately.
 - Parallel execution not installed
@@ -220,6 +217,79 @@ Tip: Start from `_TEMPLATE.json` and replace absolute paths and values.
   - The `csnn_collection.sh` merges `*.txt` into `collected_results.txt`
     under the configured FE path on the machine;
     use `scp` to copy it back to the FE as needed.
+
+## Per-project params folders
+
+You can organize parameter lists per project inside the repo under
+`experiments-runner/params/` using one folder per project. Each project
+contains its params file (one params line per experiment). The delegator
+tracker file is created next to that params file.
+
+Params path resolution rules (Option A behavior):
+
+- The config value `running_experiments.on_fe.to_do_parameters_list_path` may
+  be either an absolute path or a repo-relative path.
+- If the value starts with `/` it is treated as an absolute path and used
+  verbatim.
+- If the value is relative, the controller resolves it under a base
+  directory `PARAMS_BASE` which defaults to `experiments-runner/params` in
+  the repo. You can override by exporting `PARAMS_BASE` in your environment
+  before running the controller:
+
+```bash
+export PARAMS_BASE=/home/youruser/SwiftDeploy-G5K/experiments-runner/params
+./experiments-runner/experiments-controller.sh --config csnn-faces.json
+```
+
+This preserves configs that already contain absolute paths (like
+`csnn-faces.json`) while allowing shorthand relative project paths for
+others (e.g. `project-a/a.txt`).
+
+## Collected results base
+
+The controller now supports a repo-local base directory for collected
+results on the frontend. If your config's `experiments_collection.path_to_save_experiment_results_on_fe`
+is an absolute path it will be used as-is. If you put a project name (or
+relative path) there, the controller will resolve it under
+`experiments-runner/collected/` by default. You can override the base with
+`COLLECTED_BASE` env var.
+
+Example:
+
+```json
+"experiments_collection": {
+  "collection_strategy": "csnn_collection.sh",
+  "path_to_save_experiment_results_on_fe": "csnn-ckplus",
+  "path_to_saved_experiment_results_on_machine": "/root/csnn-build/result"
+}
+```
+
+This will write collected outputs to `experiments-runner/collected/csnn-ckplus/collected_results.txt`.
+
+Example layout:
+
+```text
+
+experiments-runner/params/
+  project-a/
+    a.txt            # params for project A
+    a_tracker.txt    # created by delegator (ignored by git)
+  project-b/
+    b.txt
+    b_tracker.txt
+
+```text
+
+How to use:
+
+- Put your params file at the absolute path your FE will have after you
+  clone the repo on the frontend (e.g. `/home/feuser/SwiftDeploy-G5K/experiments-runner/params/project-a/a.txt`).
+- Set `running_experiments.on_fe.to_do_parameters_list_path` in the config
+  to that absolute path. The delegator will create `${params_file%.txt}_tracker.txt`
+  next to the params file to keep track of completed lines.
+
+Note: `.gitignore` already ignores `experiments-runner/params/**/*_tracker.txt`
+so trackers won't be committed.
 
 ## Examples
 

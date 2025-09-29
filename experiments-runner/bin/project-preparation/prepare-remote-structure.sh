@@ -12,11 +12,10 @@ DRY_RUN=false
 CONFIG_JSON=""
 OS_TYPE=""
 FULL_PATH=""
-PKG_FILE=""
 
 usage() {
 	cat <<EOF
-Usage: prepare-remote-structure.sh --config <file.json> --os-type {1|2|3} --full-path <abs> --packages-file <path> [--dry-run]
+Usage: prepare-remote-structure.sh --config <file.json> --os-type {1|2|3} --full-path <abs> [--dry-run]
 Requires environment: G5K_USER, G5K_HOST, G5K_SSH_KEY
 Creates remote structure under ~/experiments_node/ and uploads required scripts.
 EOF
@@ -36,10 +35,6 @@ while [[ $# -gt 0 ]]; do
 			FULL_PATH="$2"
 			shift 2
 			;;
-		--packages-file)
-			PKG_FILE="$2"
-			shift 2
-			;;
 		--dry-run)
 			DRY_RUN=true
 			shift
@@ -55,6 +50,9 @@ while [[ $# -gt 0 ]]; do
 			;;
 	esac
 done
+
+# OS_TYPE is accepted for CLI compatibility but not currently used; mark as referenced
+: "${OS_TYPE:-}"
 
 # Check required environment variables
 for v in G5K_USER G5K_HOST G5K_SSH_KEY; do
@@ -138,16 +136,6 @@ else
 fi
 run_ssh "bash '${TMP_WRITE_ENV}' --json-file '${TMP_JSON}' ${DRY_RUN:+--dry-run}"
 
-echo "[INFO] Installing dependencies on remote (type=${OS_TYPE}, file=${PKG_FILE})"
-TMP_PKGS="/tmp/exp_pkgs_$$.txt"
-TMP_INSTALL="/tmp/install-deps_$$.sh"
-if [[ ${DRY_RUN} == true ]]; then
-	echo "[DRY-RUN] upload packages file to remote: ${PKG_FILE} -> ${TMP_PKGS}"
-	echo "[DRY-RUN] upload install-dependencies.sh to remote: ${TMP_INSTALL}"
-else
-	scp -o BatchMode=yes -o StrictHostKeyChecking=accept-new -i "${G5K_SSH_KEY}" "${PKG_FILE}" "${G5K_USER}@${G5K_HOST}:${TMP_PKGS}"
-	scp -o BatchMode=yes -o StrictHostKeyChecking=accept-new -i "${G5K_SSH_KEY}" "${ROOT_DIR}/bin/project-preparation/node-setup/install-dependencies.sh" "${G5K_USER}@${G5K_HOST}:${TMP_INSTALL}"
-fi
-run_ssh "bash '${TMP_INSTALL}' --os-type '${OS_TYPE}' --packages-file '${TMP_PKGS}' ${DRY_RUN:+--dry-run}"
+echo "[INFO] Skipping package installation (list_of_needed_libraries removed). Remote preparation complete."
 
 echo "[INFO] Remote preparation complete."

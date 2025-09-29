@@ -1,27 +1,26 @@
 {
   "running_experiments": {
     "on_fe": {
-      "to_do_parameters_list_path": "/ABSOLUTE/FE/PATH/params/csnn_params.txt"
+      "to_do_parameters_list_path": "csnn-ckplus/runs.txt"
     },
     "on_machine": {
-      "execute_command": "./run_experiment",
-      "full_path_to_executable": "/ABSOLUTE/MACHINE/PATH/csnn"
+      "execute_command": "./Video_3d_CK_Plus_face_single_elypse_experiment",
+      "full_path_to_executable": "/root/csnn-build"
     },
     "number_of_experiments_to_run_in_parallel_on_machine": 5,
     "experiments_collection": {
       "collection_strategy": "csnn_collection.sh",
-      "path_to_save_experiment_results_on_fe": "/ABSOLUTE/FE/PATH/results/csnn",
-      "path_to_saved_experiment_results_on_machine": "/ABSOLUTE/MACHINE/PATH/results/csnn"
+      "path_to_save_experiment_results_on_fe": "csnn-ckplus",
+      "path_to_saved_experiment_results_on_machine": "/root/csnn-build/result"
     }
   },
   "machine_setup": {
-    "image_to_use": "csnn_image.yaml",
+    "image_to_use": "env-csnn-st-with-dbs-image.yaml",
     "env_variables_list": [
-      { "OMP_NUM_THREADS": "1" },
-      { "CUDA_VISIBLE_DEVICES": "0" }
+      { "CK_PLUS_CSV_PATH": "/root/data_CK+/CK+_emotion.csv" },
+      { "CK_PLUS_IMAGES_DIR": "/root/data_CK+" }
     ],
     "is_machine_instantiator_manual": true,
-    "list_of_needed_libraries": "/ABSOLUTE/MACHINE/PATH/bootstrap/requirements.txt",
     "os_distribution_type": 1
   }
 }
