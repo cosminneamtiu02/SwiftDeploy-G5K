@@ -21,9 +21,17 @@ while [[ $# -gt 0 ]]; do
 			MACHINE_PATH="$2"
 			shift 2
 			;;
+		--machine-path=*)
+			MACHINE_PATH="${1#*=}"
+			shift
+			;;
 		--fe-path)
 			FE_PATH="$2"
 			shift 2
+			;;
+		--fe-path=*)
+			FE_PATH="${1#*=}"
+			shift
 			;;
 		--dry-run)
 			DRY_RUN=true
@@ -54,9 +62,6 @@ if [[ ! -d ${MACHINE_PATH} ]]; then
 	echo "[ERROR] Machine path not found: ${MACHINE_PATH}" >&2
 	exit 2
 fi
-
-mkdir -p "${FE_PATH}"
-OUT_FILE="${FE_PATH}/collected_results.txt"
 
 mkdir -p "${FE_PATH}"
 OUT_FILE="${FE_PATH}/collected_results.txt"
