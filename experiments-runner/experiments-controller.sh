@@ -397,6 +397,8 @@ if [[ -n ${IMAGE_TO_USE:-} ]]; then
 	IMAGE_YAML_PATH="${YAML_LOOKUP_DIR}/${IMAGE_TO_USE}"
 	if [[ -f ${IMAGE_YAML_PATH} ]]; then
 		log_info "Using image YAML: ${IMAGE_YAML_PATH}"
+		# Export for child scripts (manual/automatic instantiation)
+		export IMAGE_YAML_PATH
 	else
 		log_err "Image YAML not found: ${IMAGE_TO_USE}. Searched in: ${YAML_LOOKUP_DIR}"
 		exit 2
