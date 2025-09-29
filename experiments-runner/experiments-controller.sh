@@ -68,17 +68,17 @@ ${SCRIPT_NAME} v${VERSION}
 Usage: ${SCRIPT_NAME} --config <FILENAME.json> [options]
 
 Options:
-  -c, --config <filename>   Filename in experiments-configurations/ (e.g., csnn-faces.json)
-  -p, --phases <list>       Comma-separated: instantiate,prepare,delegate,collect
-  --dry-run                 Print commands without executing
-  --verbose                 Enable debug logs
-  --continue-on-error       Continue remaining phases if one fails
-  --manual                  Force manual machine instantiation script
-  --log-dir <dir>           Custom directory for logs (default: experiments-runner/logs/<ts>)
-  --no-color                Disable colored output
-  --no-live-logs            Disable live streaming (logs still written)
-  -h, --help                Show help
-  --version                 Print version
+	-c, --config <filename>   Filename in experiments-configurations/ (e.g., csnn-faces.json)
+	-p, --phases <list>       Comma-separated: instantiate,prepare,delegate,collect
+	--dry-run                 Print commands without executing
+	--verbose                 Enable debug logs
+	--continue-on-error       Continue remaining phases if one fails
+	--manual                  Force manual machine instantiation script
+	--log-dir <dir>           Custom directory for logs (default: experiments-runner/logs/<ts>)
+	--no-color                Disable colored output
+	--no-live-logs            Disable live streaming (logs still written)
+	-h, --help                Show help
+	--version                 Print version
 EOF
 }
 

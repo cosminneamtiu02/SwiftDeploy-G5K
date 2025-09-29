@@ -15,29 +15,29 @@ manual-machine-start.sh --help
 This script prints instructions for manual Grid'5000 instantiation and validates SSH access.
 
 Environment expected after manual steps:
-  G5K_USER     Grid'5000 username
-  G5K_HOST     Target SSH host (e.g., node-1.site.grid5000.fr)
-  G5K_SSH_KEY  Path to private key for SSH
+	G5K_USER     Grid'5000 username
+	G5K_HOST     Target SSH host (e.g., node-1.site.grid5000.fr)
+	G5K_SSH_KEY  Path to private key for SSH
 
 Validation performed:
-if [[ -z "${G5K_SSH_KEY:-}" ]]; then
-	echo "G5K_SSH_KEY is not set" >&2
-	exit 1
-fi
-if [[ -z "${G5K_USER:-}" ]]; then
-	echo "G5K_USER is not set" >&2
-	exit 1
-fi
-if [[ -z "${G5K_HOST:-}" ]]; then
-	echo "G5K_HOST is not set" >&2
-	exit 1
-fi
-ssh -o BatchMode=yes -i "${G5K_SSH_KEY}" "${G5K_USER}@${G5K_HOST}" true
+	if [[ -z "${G5K_SSH_KEY:-}" ]]; then
+		echo "G5K_SSH_KEY is not set" >&2
+		exit 1
+	fi
+	if [[ -z "${G5K_USER:-}" ]]; then
+		echo "G5K_USER is not set" >&2
+		exit 1
+	fi
+	if [[ -z "${G5K_HOST:-}" ]]; then
+		echo "G5K_HOST is not set" >&2
+		exit 1
+	fi
+	ssh -o BatchMode=yes -i "${G5K_SSH_KEY}" "${G5K_USER}@${G5K_HOST}" true
 
 Exit codes:
-  0 OK
-  1 Missing env
-  2 SSH connectivity failure
+	0 OK
+	1 Missing env
+	2 SSH connectivity failure
 EOF
 }
 

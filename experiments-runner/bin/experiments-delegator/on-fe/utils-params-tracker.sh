@@ -8,8 +8,8 @@ trap 'echo "[ERROR] ${BASH_SOURCE[0]}:${LINENO} ${BASH_COMMAND}" >&2' ERR
 usage() {
 	cat <<EOF
 Usage:
-  ${0##*/} select_next_lines <params_file> <tracker_file> <max_count>
-  ${0##*/} append_tracker <tracker_file> <line1> [line2 ...]
+	${0##*/} select_next_lines <params_file> <tracker_file> <max_count>
+	${0##*/} append_tracker <tracker_file> <line1> [line2 ...]
 EOF
 }
 

@@ -12,7 +12,7 @@ PKG_FILE=""
 usage() {
 	cat <<EOF
 Usage: install-dependencies.sh --os-type {1|2|3} --packages-file <path> [--dry-run]
-  1=Debian/apt, 2=RHEL7/yum, 3=RHEL7+/dnf.
+	1=Debian/apt, 2=RHEL7/yum, 3=RHEL7+/dnf.
 EOF
 }
 

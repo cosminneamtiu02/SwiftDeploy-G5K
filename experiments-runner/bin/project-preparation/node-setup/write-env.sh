@@ -56,14 +56,6 @@ else
 fi
 
 echo "[INFO] Persisting env vars to ${target_file}"
-target_file=""
-if command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
-	target_file="/etc/profile.d/99-experiments.sh"
-else
-	target_file="${HOME}/.profile"
-fi
-
-echo "[INFO] Persisting env vars to ${target_file}"
 
 append_line() {
 	local line="$1"
