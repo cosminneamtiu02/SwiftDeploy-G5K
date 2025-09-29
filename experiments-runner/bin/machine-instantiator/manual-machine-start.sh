@@ -72,9 +72,16 @@ fi
 echo "[INFO] Checking connectivity to ${G5K_USER}@${G5K_HOST} ..."
 # Prefer oarsh when running inside an OAR job (partial allocations may block plain ssh).
 if command -v oarsh >/dev/null 2>&1 && [[ -n ${OAR_NODEFILE:-} || -n ${OAR_JOB_ID:-} ]]; then
-	if ! oarsh "${G5K_HOST}" true; then
-		echo "[ERROR] Unable to connect with oarsh to ${G5K_HOST}" >&2
-		exit 2
+	if [[ -n ${OAR_JOB_ID:-} ]]; then
+		if ! oarsh -t "${OAR_JOB_ID}" "${G5K_HOST}" true; then
+			echo "[ERROR] Unable to connect with oarsh -t ${OAR_JOB_ID} to ${G5K_HOST}" >&2
+			exit 2
+		fi
+	else
+		if ! oarsh "${G5K_HOST}" true; then
+			echo "[ERROR] Unable to connect with oarsh to ${G5K_HOST}" >&2
+			exit 2
+		fi
 	fi
 else
 	if ! ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -i "${G5K_SSH_KEY}" "${G5K_USER}@${G5K_HOST}" true; then
