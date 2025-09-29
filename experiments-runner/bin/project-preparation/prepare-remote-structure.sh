@@ -76,26 +76,12 @@ command -v jq >/dev/null 2>&1 || {
 	exit 2
 }
 
-# Common SSH helpers (key-only auth, retries)
+# Common copy helpers (scp with retries)
 # shellcheck source=../utils/libremote.sh
 # shellcheck disable=SC1091
 source "${ROOT_DIR}/bin/utils/libremote.sh"
 
 REMOTE_BASE="${HOME}/experiments_node"
-REMOTE_ONM="${REMOTE_BASE}/on-machine"
-REMOTE_BOOTSTRAP="${REMOTE_ONM}/bootstrap"
-REMOTE_EXECUTABLES="${REMOTE_ONM}/executables"
-REMOTE_RESULTS="${REMOTE_ONM}/results"
-REMOTE_LOGS="${REMOTE_ONM}/logs"
-REMOTE_COLLECTION="${REMOTE_ONM}/collection"
-
-run_ssh() {
-	if [[ ${DRY_RUN} == true ]]; then
-		echo "[DRY-RUN] remote: $*"
-		return 0
-	fi
-	ssh_retry "${G5K_USER}" "${G5K_HOST}" "${G5K_SSH_KEY}" "$*"
-}
 
 run_scp_to() {
 	local dest="$1"
@@ -107,36 +93,23 @@ run_scp_to() {
 	scp_to_retry "${G5K_USER}" "${G5K_HOST}" "${G5K_SSH_KEY}" "$@" "${dest}"
 }
 
-echo "[INFO] Creating remote directories under ${REMOTE_BASE}"
-run_ssh "mkdir -p '${REMOTE_EXECUTABLES}' '${REMOTE_RESULTS}' '${REMOTE_LOGS}' '${REMOTE_COLLECTION}' '${REMOTE_BOOTSTRAP}'"
-
-echo "[INFO] Uploading on-machine scripts"
-run_scp_to "${REMOTE_ONM}/" \
-	"${ROOT_DIR}/bin/experiments-delegator/on-machine/run-batch.sh"
-
-if compgen -G "${ROOT_DIR}/bin/experiments-collector/on-machine/*.sh" >/dev/null; then
-	run_scp_to "${REMOTE_ONM}/collection/" "${ROOT_DIR}/bin/experiments-collector/on-machine/"*.sh
-fi
-
-echo "[INFO] Ensuring full_path_to_executable directory exists: ${FULL_PATH}"
-REMOTE_EXEC_DIR="$(dirname "${FULL_PATH}")"
-run_ssh "mkdir -p '${REMOTE_EXEC_DIR}' && { test -f '${FULL_PATH}' && chmod +x '${FULL_PATH}' || true; }"
-
-echo "[INFO] Writing environment variables on remote"
-TMP_JSON="/tmp/exp_config_$$.json"
-TMP_WRITE_ENV="/tmp/write-env_$$.sh"
+echo "[INFO] Uploading launch parameters for agent (full path and config)"
+REMOTE_CONTROL="${REMOTE_BASE}/control"
 if [[ ${DRY_RUN} == true ]]; then
-	echo "[DRY-RUN] upload config to remote: ${CONFIG_JSON} -> ${TMP_JSON}"
-	echo "[DRY-RUN] upload write-env.sh to remote: ${TMP_WRITE_ENV}"
+	echo "[DRY-RUN] scp CONFIG_JSON -> ${REMOTE_CONTROL}/config.json"
+	echo "[DRY-RUN] scp FULL_PATH -> ${REMOTE_CONTROL}/full_path.txt"
 else
-	# Use the same copy helper to benefit from oarcp when in an OAR context
-	run_scp_to "${TMP_JSON}" "${CONFIG_JSON}"
-	run_scp_to "${TMP_WRITE_ENV}" "${ROOT_DIR}/bin/project-preparation/node-setup/write-env.sh"
+	# Ensure control dir exists via a directory file copy: create local tmp dir with marker files
+	tmpdir=$(mktemp -d)
+	mkdir -p "${tmpdir}/control"
+	: >"${tmpdir}/control/.keep"
+	scp_to_retry "${G5K_USER}" "${G5K_HOST}" "${G5K_SSH_KEY}" "${tmpdir}/control" "${REMOTE_BASE}/"
+	rm -rf "${tmpdir}"
+	run_scp_to "${REMOTE_CONTROL}/config.json" "${CONFIG_JSON}"
+	tmp_fp=$(mktemp)
+	printf '%s\n' "${FULL_PATH}" >"${tmp_fp}"
+	run_scp_to "${REMOTE_CONTROL}/full_path.txt" "${tmp_fp}"
+	rm -f "${tmp_fp}"
 fi
-opt_dry=""
-if [[ ${DRY_RUN} == true ]]; then opt_dry=" --dry-run"; fi
-run_ssh "bash '${TMP_WRITE_ENV}' --json-file '${TMP_JSON}'${opt_dry}"
 
-echo "[INFO] Skipping package installation (list_of_needed_libraries removed). Remote preparation complete."
-
-echo "[INFO] Remote preparation complete."
+echo "[INFO] Remote preparation complete (agent installed)."

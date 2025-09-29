@@ -123,24 +123,14 @@ for line in "${SELECTED[@]}"; do
 done
 
 REMOTE_BASE="${HOME}/experiments_node"
-REMOTE_BOOTSTRAP="${REMOTE_BASE}/on-machine/bootstrap"
-REMOTE_CMDS="${REMOTE_BOOTSTRAP}/commands.pending"
+REMOTE_CONTROL="${REMOTE_BASE}/control"
+REMOTE_CMDS="${REMOTE_CONTROL}/commands.pending"
 REMOTE_LOGS="${REMOTE_BASE}/on-machine/logs"
 
-# Common SSH helpers (key-only auth, retries)
+# Common copy helpers (scp with retries)
 # shellcheck source=../utils/libremote.sh
 # shellcheck disable=SC1091
 source "${ROOT_DIR}/bin/utils/libremote.sh"
-# Fallback for shellcheck/when not sourced: define SSH_OPTS_BASE if unset
-if [[ -z ${SSH_OPTS_BASE+set} ]]; then
-	SSH_OPTS_BASE=(
-		-o "BatchMode=yes"
-		-o "StrictHostKeyChecking=accept-new"
-		-o "PreferredAuthentications=publickey"
-		-o "PasswordAuthentication=no"
-		-o "KbdInteractiveAuthentication=no"
-	)
-fi
 
 if [[ ${DRY_RUN} == true ]]; then
 	echo "[DRY-RUN] Would upload commands to ${REMOTE_CMDS} and call run-batch"
@@ -149,27 +139,51 @@ if [[ ${DRY_RUN} == true ]]; then
 	exit 0
 fi
 
-echo "[INFO] Uploading commands list to remote: ${REMOTE_CMDS}"
-ssh_retry "${G5K_USER}" "${G5K_HOST}" "${G5K_SSH_KEY}" "mkdir -p '${REMOTE_BOOTSTRAP}' '${REMOTE_LOGS}'"
+echo "[INFO] Uploading commands list to remote control: ${REMOTE_CMDS}"
+# Ensure control dir exists by copying a local stub directory
+tmpdir=$(mktemp -d)
+mkdir -p "${tmpdir}/control"
+: >"${tmpdir}/control/.keep"
+scp_to_retry "${G5K_USER}" "${G5K_HOST}" "${G5K_SSH_KEY}" "${tmpdir}/control" "${REMOTE_BASE}/"
+rm -rf "${tmpdir}"
 scp_to_retry "${G5K_USER}" "${G5K_HOST}" "${G5K_SSH_KEY}" "${TMP_CMDS_LOCAL}" "${REMOTE_CMDS}"
 
-echo "[INFO] Triggering remote batch runner"
-ssh_retry "${G5K_USER}" "${G5K_HOST}" "${G5K_SSH_KEY}" \
-	"bash '${REMOTE_BASE}/on-machine/run-batch.sh' --full-path '${FULL_PATH}' --commands-file '${REMOTE_CMDS}' --parallel '${PARALLEL}'"
+echo "[INFO] Triggering node agent via control file"
+# Upload parallel.txt and full_path.txt if not already present
+tmp_par=$(mktemp)
+printf '%s\n' "${PARALLEL}" >"${tmp_par}"
+scp_to_retry "${G5K_USER}" "${G5K_HOST}" "${G5K_SSH_KEY}" "${tmp_par}" "${REMOTE_CONTROL}/parallel.txt"
+rm -f "${tmp_par}"
+tmp_fp=$(mktemp)
+printf '%s\n' "${FULL_PATH}" >"${tmp_fp}"
+scp_to_retry "${G5K_USER}" "${G5K_HOST}" "${G5K_SSH_KEY}" "${tmp_fp}" "${REMOTE_CONTROL}/full_path.txt"
+rm -f "${tmp_fp}"
+# Create trigger file remotely by scp of an empty file
+tmp_tr=$(mktemp)
+: >"${tmp_tr}"
+scp_to_retry "${G5K_USER}" "${G5K_HOST}" "${G5K_SSH_KEY}" "${tmp_tr}" "${REMOTE_CONTROL}/trigger"
+rm -f "${tmp_tr}"
 
 echo "[INFO] Remote batch started."
 
 # Optional live log streaming loop while commands run
 if [[ ${STREAM} == true ]]; then
-	echo "[INFO] Streaming remote logs (Ctrl-C to stop streaming; job will continue)"
-	# Use a single interactive ssh for streaming; do not wrap with retries to avoid duplicate tails
-	ssh "${SSH_OPTS_BASE[@]}" -t -i "${G5K_SSH_KEY}" "${G5K_USER}@${G5K_HOST}" \
-		"bash -lc 'mkdir -p \"${REMOTE_LOGS}\"; touch \"${REMOTE_LOGS}/stream.marker\"; tail -F \"${REMOTE_LOGS}\"/*.out \"${REMOTE_LOGS}\"/*.err 2>/dev/null'" || true
+	echo "[INFO] Streaming is disabled in pure-scp mode. Check logs under ${REMOTE_LOGS} after completion."
 fi
 
-echo "[INFO] Waiting for remote batch to complete..."
-ssh_retry "${G5K_USER}" "${G5K_HOST}" "${G5K_SSH_KEY}" \
-	"bash -lc 'while pgrep -af run-batch.sh >/dev/null; do sleep 2; done'" || true
+echo "[INFO] Waiting for remote batch to complete (polling status file via scp) ..."
+STATUS_LOCAL=$(mktemp)
+while :; do
+	if scp_from_retry "${G5K_USER}" "${G5K_HOST}" "${G5K_SSH_KEY}" "${REMOTE_CONTROL}/status.json" "${STATUS_LOCAL}" 2>/dev/null; then
+		state=$(jq -r '.state // empty' <"${STATUS_LOCAL}" 2>/dev/null || true)
+		if [[ ${state} == "done" ]]; then
+			echo "[INFO] Remote batch completed."
+			break
+		fi
+	fi
+	sleep 2
+done
+rm -f "${STATUS_LOCAL}"
 
 echo "[INFO] Remote batch completed."
 
@@ -185,9 +199,16 @@ else
 fi
 
 if [[ -n ${strategy} && -n ${machine_path} && -n ${fe_path} ]]; then
-	echo "[INFO] Triggering collection: ${strategy}"
-	ssh_retry "${G5K_USER}" "${G5K_HOST}" "${G5K_SSH_KEY}" \
-		"bash -lc '${REMOTE_BASE}/on-machine/collection/${strategy} --machine-path \"${machine_path}\" --fe-path \"${fe_path}\"'"
+	echo "[INFO] Requesting collection via agent config"
+	tmp_cfg=$(mktemp)
+	printf '%s' "${COLLECTION_JSON}" >"${tmp_cfg}"
+	scp_to_retry "${G5K_USER}" "${G5K_HOST}" "${G5K_SSH_KEY}" "${tmp_cfg}" "${REMOTE_CONTROL}/config.json"
+	rm -f "${tmp_cfg}"
+	# Re-trigger for collection
+	tmp_tr2=$(mktemp)
+	: >"${tmp_tr2}"
+	scp_to_retry "${G5K_USER}" "${G5K_HOST}" "${G5K_SSH_KEY}" "${tmp_tr2}" "${REMOTE_CONTROL}/trigger"
+	rm -f "${tmp_tr2}"
 else
 	echo "[INFO] No collection triggered (strategy or paths missing)."
 fi
