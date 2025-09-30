@@ -82,7 +82,11 @@ cd "${EXEC_DIR}" || die "Cannot cd to ${EXEC_DIR}"
 
 # Prefer GNU parallel if exists
 if command -v parallel >/dev/null 2>&1; then
-	printf '%s\n' "${batch[@]}" | sed -e "s#^#${EXEC_CMD} #" | parallel -j "${PARALLEL_N}" --halt soon,fail=1
+	# Stream outputs to both console and delegator.log so FE tail can display them nicely
+	printf '%s\n' "${batch[@]}" |
+		sed -e "s#^#${EXEC_CMD} #" |
+		parallel -j "${PARALLEL_N}" --halt soon,fail=1 2>&1 |
+		tee -a "${LOGS_DIR}/delegator.log"
 else
 	pids=()
 	for params in "${batch[@]}"; do

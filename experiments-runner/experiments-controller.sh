@@ -13,6 +13,8 @@ CONFIGS_DIR_PRIMARY="${RUNNER_ROOT}/experiments-configurations"
 CONFIGS_DIR_IMPL="${CONFIGS_DIR_PRIMARY}/implementations"
 CURRENT_NODE_FILE="${RUNNER_ROOT}/current_node.txt"
 ALT_NODE_FILE="${REPO_ROOT}/current_node.txt"
+REMOTE_BASE_DIR="/root/experiments_node"
+REMOTE_LOGS_DIR="${REMOTE_BASE_DIR}/on-machine/logs"
 
 # --- CLI args ---
 CONFIG_NAME=""
@@ -88,6 +90,15 @@ __on_err() {
 	log_error "See ${LOG_FILE} for details."
 }
 trap __on_err ERR
+
+# Ensure background streams are cleaned up on exit
+__cleanup() {
+	if [[ -n ${STREAM_PID:-} ]]; then
+		kill "${STREAM_PID}" >/dev/null 2>&1 || true
+		wait "${STREAM_PID}" >/dev/null 2>&1 || true
+	fi
+}
+trap __cleanup EXIT
 
 # --- Dependencies ---
 require_cmd jq
@@ -201,7 +212,31 @@ fi
 log_step "Phase 3/4: Delegating experiments on node"
 DELEG_CMD="bash -lc 'CONFIG_JSON=~/experiments_node/config.json ~/experiments_node/on-machine/run_delegator.sh'"
 if ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" 'echo ok' >/dev/null 2>&1; then
+	# Start streaming remote logs to FE console
+	if command -v stdbuf >/dev/null 2>&1; then
+		log_info "Starting remote log stream from ${NODE_NAME} (${REMOTE_LOGS_DIR})"
+		ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" \
+			"bash -lc 'mkdir -p ${REMOTE_LOGS_DIR}; touch ${REMOTE_LOGS_DIR}/delegator.log ${REMOTE_LOGS_DIR}/collector.log; stdbuf -oL -eL tail -n +1 -F ${REMOTE_LOGS_DIR}/delegator.log ${REMOTE_LOGS_DIR}/collector.log ${REMOTE_LOGS_DIR}/*.out 2>/dev/null'" |
+			while IFS= read -r line; do log_info "[${NODE_NAME}] ${line}"; done &
+		STREAM_PID=$!
+	else
+		log_warn "stdbuf not available on FE; log streaming may be buffered."
+		ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" \
+			"bash -lc 'mkdir -p ${REMOTE_LOGS_DIR}; touch ${REMOTE_LOGS_DIR}/delegator.log ${REMOTE_LOGS_DIR}/collector.log; tail -n +1 -F ${REMOTE_LOGS_DIR}/delegator.log ${REMOTE_LOGS_DIR}/collector.log ${REMOTE_LOGS_DIR}/*.out 2>/dev/null'" |
+			while IFS= read -r line; do log_info "[${NODE_NAME}] ${line}"; done &
+		STREAM_PID=$!
+	fi
+
+	# Run delegator synchronously; its stdout will also appear locally
 	LOG_FILE="${LOG_DIR}/delegator.log" ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" "${DELEG_CMD}"
+
+	# Stop streaming once delegator completes
+	if [[ -n ${STREAM_PID:-} ]]; then
+		kill "${STREAM_PID}" >/dev/null 2>&1 || true
+		wait "${STREAM_PID}" >/dev/null 2>&1 || true
+		unset STREAM_PID
+		log_info "Stopped remote log stream from ${NODE_NAME}"
+	fi
 else
 	log "SSH not available. Please run on the node: CONFIG_JSON=~/experiments_node/config.json ~/experiments_node/on-machine/run_delegator.sh"
 fi
