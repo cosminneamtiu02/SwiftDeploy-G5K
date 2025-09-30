@@ -4,7 +4,8 @@ set -euo pipefail
 IFS=$'\n\t'
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-RUNNER_ROOT="$(cd "${SCRIPT_DIR}/../../../.." && pwd)"
+# From on-fe -> project-preparation -> bin -> experiments-runner (3 levels up)
+RUNNER_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 # shellcheck source=/dev/null
 source "${RUNNER_ROOT}/bin/utils/common.sh"
 
