@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
-# Manual machine instantiation: user reserves a node and deploys the given image YAML
-# Writes the node name to experiments-runner/current_node.txt
+# Manual machine instantiation with auto-detection of allocated node
+# - Verifies YAML exists under ~/envs/img-files
+# - Tries to detect node from OAR nodefile or oarstat
+# - Falls back to prompting the user only if detection fails
 set -euo pipefail
 IFS=$'\n\t'
 
@@ -18,23 +20,68 @@ YAML_PATH="${YAML_DIR}/${YAML_NAME}"
 
 if [[ ! -f ${YAML_PATH} ]]; then
 	echo "ERROR: YAML not found at ${YAML_PATH}" >&2
-	echo "Hint: the env-creator now stores YAMLs under ~/envs/img-files and tars under ~/envs/img" >&2
+	echo "Hint: the env-creator stores YAMLs under ~/envs/img-files and tars under ~/envs/img" >&2
 	exit 1
 fi
 
-cat <<EOF
-Manual instantiation selected.
-Please ensure you have an interactive deploy shell on Grid'5000 with a node reserved, e.g.:
-  oarsub -I -t deploy -q default
-Then deploy the image in that terminal (YAML from ~/envs/img-files):
-	kadeploy3 -a ${YAML_PATH}
-After deployment completes, identify the node name (hostname). Enter it below.
-EOF
+echo "Manual instantiation selected."
+echo "Expecting you already ran: oarsub -I -t deploy -q default (in another terminal)."
+echo "To deploy the image there: kadeploy3 -a ${YAML_PATH}"
 
-read -r -p "Enter the allocated node hostname (e.g., parasilo-XX.nancy.grid5000.fr): " NODE_NAME
+detect_from_oar_env() {
+	# Try common OAR nodefile env vars
+	for var in OAR_NODEFILE OAR_NODE_FILE OAR_FILE_NODES; do
+		if [[ -n ${!var-} && -f ${!var} ]]; then
+			head -n1 "${!var}" | awk '{print $1}'
+			return 0
+		fi
+	done
+	return 1
+}
+
+detect_from_oarstat() {
+	if ! command -v oarstat >/dev/null 2>&1; then
+		return 1
+	fi
+	local last_id
+	last_id=$(oarstat -u | awk '/^[0-9]+/ {print $1}' | tail -n1 || true)
+	if [[ -z ${last_id} ]]; then
+		return 1
+	fi
+	local line
+	line=$(oarstat -j "${last_id}" -f | awk -F': ' '/^assigned_hostnames/ {print $2}')
+	# sanitize: remove brackets, quotes, commas, then take first hostname
+	echo "${line}" | tr -d '[],' | tr -d "'\"" | awk '{print $1}'
+}
+
+NODE_NAME=""
+tmp=""
+
+# Try detect from OAR env file without disabling 'set -e' for the whole script
+set +e
+tmp=$(detect_from_oar_env)
+status=$?
+set -e
+if [[ ${status} -eq 0 && -n ${tmp} ]]; then
+	NODE_NAME=${tmp}
+	echo "Auto-detected node from OAR env file: ${NODE_NAME}"
+else
+	set +e
+	tmp=$(detect_from_oarstat)
+	status=$?
+	set -e
+	if [[ ${status} -eq 0 && -n ${tmp} ]]; then
+		NODE_NAME=${tmp}
+		echo "Auto-detected node via oarstat: ${NODE_NAME}"
+	fi
+fi
+
 if [[ -z ${NODE_NAME} ]]; then
-	echo "No node name provided." >&2
-	exit 1
+	read -r -p "Enter the allocated node hostname (e.g., parasilo-XX.nancy.grid5000.fr): " NODE_NAME
+	if [[ -z ${NODE_NAME} ]]; then
+		echo "No node name provided." >&2
+		exit 1
+	fi
 fi
 
 printf '%s\n' "${NODE_NAME}" >"${CURRENT_NODE_FILE}"
