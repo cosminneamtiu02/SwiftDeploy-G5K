@@ -27,7 +27,7 @@ fi
 
 echo "Manual instantiation selected."
 echo "Expecting you already ran: oarsub -I -t deploy -q default (in another terminal)."
-echo "To deploy the image there: kadeploy3 -a ${YAML_PATH}"
+echo "Will deploy image automatically if needed: kadeploy3 -a ${YAML_PATH} -m <node>"
 
 detect_from_oar_env() {
 	# Try common OAR nodefile env vars
@@ -88,3 +88,44 @@ fi
 printf '%s\n' "${NODE_NAME}" >"${CURRENT_NODE_FILE}"
 chmod 600 "${CURRENT_NODE_FILE}"
 echo "Saved node to ${CURRENT_NODE_FILE}: ${NODE_NAME}"
+
+# Deploy the image to the allocated node if SSH isn't ready yet
+wait_for_ssh() {
+	local host="$1"
+	local timeout="${2:-300}"
+	local start end
+	start=$(date +%s)
+	while true; do
+		if ssh -o BatchMode=yes -o StrictHostKeyChecking=no "root@${host}" 'echo ok' >/dev/null 2>&1; then
+			return 0
+		fi
+		end=$(date +%s)
+		if ((end - start > timeout)); then
+			return 1
+		fi
+		sleep 3
+	done
+}
+
+if ! ssh -o BatchMode=yes -o StrictHostKeyChecking=no "root@${NODE_NAME}" 'echo ok' >/dev/null 2>&1; then
+	if command -v kadeploy3 >/dev/null 2>&1; then
+		echo "SSH on ${NODE_NAME} not ready. Deploying image via kadeploy3..."
+		# Prefer targeting the specific node to avoid ambiguity
+		if ! kadeploy3 -a "${YAML_PATH}" -m "${NODE_NAME}"; then
+			echo "kadeploy3 failed on ${NODE_NAME}" >&2
+			exit 1
+		fi
+		echo "Waiting for SSH to become available on ${NODE_NAME}..."
+		set +e
+		wait_for_ssh "${NODE_NAME}" 600
+		wst=$?
+		set -e
+		if [[ ${wst} -ne 0 ]]; then
+			echo "Timed out waiting for SSH on ${NODE_NAME}" >&2
+			exit 1
+		fi
+		echo "SSH is now available on ${NODE_NAME}."
+	else
+		echo "kadeploy3 not found. Please deploy manually: kadeploy3 -a ${YAML_PATH} -m ${NODE_NAME}" >&2
+	fi
+fi

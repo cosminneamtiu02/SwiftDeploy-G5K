@@ -132,6 +132,44 @@ log "Target node: ${NODE_NAME}"
 
 # --- Phase 2: Project preparation ---
 log "Phase 2/4: Project preparation (FE copies + node setup)"
+
+# Ensure node is deployed and SSH is available; deploy if necessary
+wait_for_ssh() {
+	local host="$1"
+	local timeout="${2:-600}"
+	local start end
+	start=$(date +%s)
+	while true; do
+		if ssh -o BatchMode=yes -o StrictHostKeyChecking=no "root@${host}" 'echo ok' >/dev/null 2>&1; then
+			return 0
+		fi
+		end=$(date +%s)
+		if ((end - start > timeout)); then
+			return 1
+		fi
+		sleep 3
+	done
+}
+
+if ! ssh -o BatchMode=yes -o StrictHostKeyChecking=no "root@${NODE_NAME}" 'echo ok' >/dev/null 2>&1; then
+	if command -v kadeploy3 >/dev/null 2>&1; then
+		log_warn "SSH not ready on ${NODE_NAME}. Deploying image via kadeploy3..."
+		if ! kadeploy3 -a "${HOME}/envs/img-files/${IMAGE_YAML_NAME}" -m "${NODE_NAME}" | tee -a "${LOG_DIR}/kadeploy.log"; then
+			die "kadeploy3 failed for ${NODE_NAME}"
+		fi
+		log_info "Waiting for SSH to come up on ${NODE_NAME}..."
+		set +e
+		wait_for_ssh "${NODE_NAME}" 900
+		wst=$?
+		set -e
+		if [[ ${wst} -ne 0 ]]; then
+			die "Timed out waiting for SSH on ${NODE_NAME}"
+		fi
+		log_success "SSH is now available on ${NODE_NAME}."
+	else
+		log_warn "kadeploy3 not available; ensure the node is deployed manually: kadeploy3 -a ${HOME}/envs/img-files/${IMAGE_YAML_NAME} -m ${NODE_NAME}"
+	fi
+fi
 PREP_FE_DIR="${BIN_DIR}/project-preparation/on-fe"
 "${PREP_FE_DIR}/prepare_on_fe.sh" \
 	--node "${NODE_NAME}" \

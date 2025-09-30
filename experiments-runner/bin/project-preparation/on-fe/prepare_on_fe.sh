@@ -57,22 +57,38 @@ REMOTE_DELEGATOR_DIR="${REMOTE_BASE}/on-machine"
 
 # Create base dirs
 log "Creating remote directories on ${NODE_NAME}"
-remote_mkdir_via_ssh "${NODE_NAME}" "${REMOTE_ON_MACHINE_DIR}"
-remote_mkdir_via_ssh "${NODE_NAME}" "${REMOTE_LOGS_DIR}"
+if ! remote_mkdir_via_ssh "${NODE_NAME}" "${REMOTE_ON_MACHINE_DIR}"; then
+	log_warn "SSH not ready on ${NODE_NAME}. Skipping remote mkdir. After deploy is ready, rerun controller or run this step manually."
+fi
+if ! remote_mkdir_via_ssh "${NODE_NAME}" "${REMOTE_LOGS_DIR}"; then
+	log_warn "SSH not ready on ${NODE_NAME}. Skipping remote logs mkdir."
+fi
 
 # Upload config and params
 log "Uploading config and params"
-scp -o StrictHostKeyChecking=no "${CONFIG_PATH}" "root@${NODE_NAME}:${REMOTE_BASE}/config.json"
-scp -o StrictHostKeyChecking=no "${PAR_FILE}" "root@${NODE_NAME}:${REMOTE_BASE}/params.txt"
+if ssh -o BatchMode=yes -o StrictHostKeyChecking=no "root@${NODE_NAME}" 'echo ok' >/dev/null 2>&1; then
+	scp -o StrictHostKeyChecking=no "${CONFIG_PATH}" "root@${NODE_NAME}:${REMOTE_BASE}/config.json"
+	scp -o StrictHostKeyChecking=no "${PAR_FILE}" "root@${NODE_NAME}:${REMOTE_BASE}/params.txt"
+else
+	log_warn "SSH not ready on ${NODE_NAME}. Skipping upload."
+fi
 
 # Upload on-machine scripts
 log "Uploading on-machine scripts"
-safe_scp_to_node "${RUNNER_ROOT}/bin/project-preparation/on-machine" "${NODE_NAME}" "${REMOTE_ON_MACHINE_DIR}"
-safe_scp_to_node "${RUNNER_ROOT}/bin/experiments-delegator/on-machine" "${NODE_NAME}" "${REMOTE_ON_MACHINE_DIR}"
-safe_scp_to_node "${RUNNER_ROOT}/bin/experiments-collector/on-machine" "${NODE_NAME}" "${REMOTE_ON_MACHINE_DIR}"
+if ssh -o BatchMode=yes -o StrictHostKeyChecking=no "root@${NODE_NAME}" 'echo ok' >/dev/null 2>&1; then
+	safe_scp_to_node "${RUNNER_ROOT}/bin/project-preparation/on-machine" "${NODE_NAME}" "${REMOTE_ON_MACHINE_DIR}"
+	safe_scp_to_node "${RUNNER_ROOT}/bin/experiments-delegator/on-machine" "${NODE_NAME}" "${REMOTE_ON_MACHINE_DIR}"
+	safe_scp_to_node "${RUNNER_ROOT}/bin/experiments-collector/on-machine" "${NODE_NAME}" "${REMOTE_ON_MACHINE_DIR}"
+else
+	log_warn "SSH not ready on ${NODE_NAME}. Skipping script upload."
+fi
 
 # Save OS type for on-machine logic
-ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" "echo '${OS_TYPE}' > ${REMOTE_BASE}/os_type.txt"
+if ssh -o BatchMode=yes -o StrictHostKeyChecking=no "root@${NODE_NAME}" 'echo ok' >/dev/null 2>&1; then
+	ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" "echo '${OS_TYPE}' > ${REMOTE_BASE}/os_type.txt"
+else
+	log_warn "SSH not ready on ${NODE_NAME}. Skipping OS type save."
+fi
 
 log "Preparation on FE complete."
 

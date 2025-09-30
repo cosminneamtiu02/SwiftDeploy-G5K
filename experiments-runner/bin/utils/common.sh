@@ -39,7 +39,13 @@ remote_mkdir_via_ssh() {
 	shift
 	local path="$1"
 	shift
-	ssh -o StrictHostKeyChecking=no "root@${node}" "mkdir -p '${path}'"
+	# Try SSH non-interactively first
+	if ssh -o BatchMode=yes -o StrictHostKeyChecking=no "root@${node}" "mkdir -p '${path}'" >/dev/null 2>&1; then
+		return 0
+	fi
+	# If that fails, hint at deploy readiness; the caller should ensure kadeploy is done
+	echo "WARN: SSH not ready on ${node}. Ensure the node is deployed and reachable." >&2
+	return 1
 }
 
 safe_scp_to_node() {
