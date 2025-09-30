@@ -16,6 +16,10 @@ ALT_NODE_FILE="${REPO_ROOT}/current_node.txt"
 REMOTE_BASE_DIR="/root/experiments_node"
 REMOTE_LOGS_DIR="${REMOTE_BASE_DIR}/on-machine/logs"
 
+# FE-side tracking (done.txt) variables
+SELECTED_BATCH=""
+BATCH_OK=0
+
 # --- CLI args ---
 CONFIG_NAME=""
 VERBOSE=false
@@ -102,6 +106,7 @@ trap __cleanup EXIT
 
 # --- Dependencies ---
 require_cmd jq
+require_cmd base64
 
 # --- Read JSON helpers ---
 jq_get() { jq -r "$1" "${CONFIG_PATH}"; }
@@ -115,9 +120,7 @@ EXEC_CMD=$(jq_get '.running_experiments.on_machine.execute_command // empty')
 EXEC_DIR=$(jq_get '.running_experiments.on_machine.full_path_to_executable // empty')
 PARALLEL_N=$(jq_get '.running_experiments.number_of_experiments_to_run_in_parallel_on_machine // 1')
 
-COLLECT_STRAT=$(jq_get '.running_experiments.experiments_collection.collection_strategy // empty')
 COLLECT_FE_DIR=$(jq_get '.running_experiments.experiments_collection.path_to_save_experiment_results_on_fe // empty')
-# shellcheck disable=SC2034 # retained for future use / debugging
 COLLECT_MACHINE_DIR=$(jq_get '.running_experiments.experiments_collection.path_to_saved_experiment_results_on_machine // empty')
 
 [[ -n ${IMAGE_YAML_NAME} ]] || die "Config error: .machine_setup.image_to_use is missing or empty"
@@ -125,6 +128,257 @@ COLLECT_MACHINE_DIR=$(jq_get '.running_experiments.experiments_collection.path_t
 [[ -n ${EXEC_CMD} ]] || die "Config error: .running_experiments.on_machine.execute_command is missing or empty"
 [[ -n ${EXEC_DIR} ]] || die "Config error: .running_experiments.on_machine.full_path_to_executable is missing or empty"
 [[ ${PARALLEL_N} =~ ^[0-9]+$ ]] || die "Config error: .running_experiments.number_of_experiments_to_run_in_parallel_on_machine must be an integer"
+
+# --- Phase 0: FE-side selection using done.txt (before any machine work) ---
+# Resolve params file on FE
+resolve_params_file_fe() {
+	local p="$1"
+	if [[ -z ${p} ]]; then
+		return 1
+	fi
+	if [[ ${p} == /* ]]; then
+		printf '%s\n' "${p}"
+	else
+		printf '%s\n' "${RUNNER_ROOT}/params/${p}"
+	fi
+}
+
+PAR_FILE_FE=$(resolve_params_file_fe "${PAR_PATH}")
+[[ -f ${PAR_FILE_FE} ]] || die "Parameters list not found on FE: ${PAR_FILE_FE}"
+
+# Determine done.txt path next to the params file
+PAR_DIR_FE=$(dirname "${PAR_FILE_FE}")
+DONE_FILE_FE="${PAR_DIR_FE}/done.txt"
+
+# Read TODO lines (preserve order, ignore blanks)
+mapfile -t FE_TODO_LINES < <(grep -v '^[[:space:]]*$' "${PAR_FILE_FE}" || true)
+
+# Ensure done.txt exists (Case 1)
+if [[ ! -f ${DONE_FILE_FE} ]]; then
+	: >"${DONE_FILE_FE}"
+fi
+mapfile -t FE_DONE_LINES < <(grep -v '^[[:space:]]*$' "${DONE_FILE_FE}" || true)
+
+# Build a quick membership map for done lines
+declare -A FE_DONE_SET=()
+for dl in "${FE_DONE_LINES[@]}"; do FE_DONE_SET["${dl}"]=1; done
+
+# Select up to PARALLEL_N lines from TODO not in done.txt
+FE_SELECTED_LINES=()
+for tl in "${FE_TODO_LINES[@]}"; do
+	if [[ -z ${FE_DONE_SET["${tl}"]+x} ]]; then
+		FE_SELECTED_LINES+=("${tl}")
+		if ((${#FE_SELECTED_LINES[@]} >= PARALLEL_N)); then
+			break
+		fi
+	fi
+done
+
+if ((${#FE_SELECTED_LINES[@]} == 0)); then
+	log_warn "Nothing left to run. Cleaning up done.txt and stopping."
+	rm -f "${DONE_FILE_FE}" 2>/dev/null || true
+	log_success "Stopped before execution: no pending parameters."
+	exit 0
+fi
+
+# Display selected lines at the very beginning (before deploy)
+log_step "Selected parameters for this run (n=${#FE_SELECTED_LINES[@]}):"
+for sl in "${FE_SELECTED_LINES[@]}"; do
+	ts=$(date +%H:%M:%S)
+	echo "[${ts}] [INFO]  [FE] ${sl}"
+done
+
+# Immediately append selected lines to done.txt
+{
+	for sl in "${FE_SELECTED_LINES[@]}"; do printf '%s\n' "${sl}"; done
+} >>"${DONE_FILE_FE}"
+
+# Prepare in-memory text for env export and for potential revert
+SELECTED_BATCH_TEXT=$(printf '%s\n' "${FE_SELECTED_LINES[@]}")
+export SELECTED_BATCH="${SELECTED_BATCH_TEXT}"
+
+# Revert helper: remove exactly one occurrence of each selected line from done.txt
+revert_done_batch() {
+	# Protect against missing or empty selection
+	[[ -f ${DONE_FILE_FE} ]] || return 0
+	# Use process substitution to avoid writing any temp files to disk for the selection
+	local tmp
+	tmp="${DONE_FILE_FE}.tmp.$$"
+	awk 'BEGIN{ while((getline line<ARGV[2])>0){c[line]++} close(ARGV[2]) } { if(c[$0]>0){ c[$0]--; next } print }' \
+		"${DONE_FILE_FE}" /dev/fd/3 3<<'EOF_FE_SELECTED'
+$(printf '%s
+' "${FE_SELECTED_LINES[@]}")
+EOF_FE_SELECTED
+	mv "${tmp}" "${DONE_FILE_FE}" || true
+}
+
+# Arrange revert on any failure before successful completion
+FE_BATCH_OK=0
+__cleanup_fe_batch() {
+	# Invoke after existing cleanup
+	if [[ ${FE_BATCH_OK} -ne 1 ]]; then
+		log_warn "Reverting FE done.txt entries for this batch due to failure/interruption."
+		revert_done_batch
+	fi
+}
+
+# Chain cleanup: ensure our revert runs at EXIT, but only after controller-local cleanup
+trap '__cleanup; __cleanup_fe_batch' EXIT
+
+# --- FE-side parameter selection using done.txt (before any deployment) ---
+# Resolve params path on FE
+resolve_fe_params_path() {
+	local p="$1"
+	if [[ -z ${p} ]]; then
+		echo ""
+		return
+	fi
+	if [[ ${p} == /* ]]; then
+		echo "${p}"
+	else
+		echo "${RUNNER_ROOT}/params/${p}"
+	fi
+}
+
+PAR_FILE_FE=$(resolve_fe_params_path "${PAR_PATH}")
+[[ -f ${PAR_FILE_FE} ]] || die "Parameters list not found on FE: ${PAR_FILE_FE}"
+
+# done.txt sits in the same folder as the params list
+PAR_DIR_FE=$(dirname "${PAR_FILE_FE}")
+DONE_FILE_FE="${PAR_DIR_FE}/done.txt"
+
+# Ensure done.txt exists (Case 1)
+if [[ ! -f ${DONE_FILE_FE} ]]; then
+	log_info "Creating tracker file: ${DONE_FILE_FE}"
+	: >"${DONE_FILE_FE}"
+fi
+
+# Compute remaining = runs.txt minus done.txt (multiset-aware)
+mapfile -t _todo_lines < <(grep -v '^[[:space:]]*$' "${PAR_FILE_FE}" || true)
+declare -A _done_counts=()
+while IFS= read -r _dl; do
+	[[ -n ${_dl} ]] || continue
+	((_done_counts["${_dl}"]++)) || true
+done < <(grep -v '^[[:space:]]*$' "${DONE_FILE_FE}" || true)
+
+_remaining=()
+for _ln in "${_todo_lines[@]}"; do
+	if [[ ${_done_counts["${_ln}"]+set} == set && ${_done_counts["${_ln}"]} -gt 0 ]]; then
+		((_done_counts["${_ln}"]--)) || true
+	else
+		_remaining+=("${_ln}")
+	fi
+done
+
+if [[ ${#_remaining[@]} -eq 0 ]]; then
+	log_info "Nothing left to run. Cleaning up tracker and exiting."
+	rm -f "${DONE_FILE_FE}" || true
+	exit 0
+fi
+
+# Take first N lines
+_select_n=${PARALLEL_N}
+SELECTED=()
+for ((i = 0; i < ${#_remaining[@]} && i < _select_n; i++)); do
+	SELECTED+=("${_remaining[${i}]}")
+done
+
+# Display selection before any deployment
+log_step "Selected parameters for this run (count=${#SELECTED[@]}):"
+for s in "${SELECTED[@]}"; do
+	log_info "${s}"
+done
+
+# Append to done.txt immediately (Case 1 and Case 2)
+{
+	for s in "${SELECTED[@]}"; do
+		printf '%s\n' "${s}"
+	done
+} >>"${DONE_FILE_FE}"
+
+# Keep selection in memory for potential revert (no temp files)
+SELECTED_BATCH=$(printf '%s\n' "${SELECTED[@]}")
+
+# Revert function: remove exactly one occurrence of each selected line from done.txt
+revert_done_selection() {
+	[[ -n ${SELECTED_BATCH} && -f ${DONE_FILE_FE} ]] || return 0
+	local tmpf="${DONE_FILE_FE}.tmp.$$"
+	awk 'BEGIN{ while((getline line<ARGV[2])>0){c[line]++} close(ARGV[2]) } { if(c[$0]>0){ c[$0]--; next } print }' \
+		"${DONE_FILE_FE}" <(printf '%s\n' "${SELECTED_BATCH}") >"${tmpf}" && mv "${tmpf}" "${DONE_FILE_FE}" || true
+}
+
+# Trap to revert on any failure in later phases (deploy/prepare/delegate/collect)
+__revert_on_fail() {
+	local code=$?
+	if [[ ${BATCH_OK} -ne 1 ]]; then
+		log_warn "Failure detected (exit=${code}). Reverting FE done.txt selection."
+		revert_done_selection
+	fi
+}
+trap __revert_on_fail ERR
+
+# --- FE-side parameters selection and done.txt management (before any deployment) ---
+FE_PARAMS_REL="${PAR_PATH}"
+FE_PARAMS_PATH="${RUNNER_ROOT}/params/${FE_PARAMS_REL}"
+FE_PARAMS_DIR="$(dirname "${FE_PARAMS_PATH}")"
+FE_DONE_FILE="${FE_PARAMS_DIR}/done.txt"
+
+[[ -f ${FE_PARAMS_PATH} ]] || die "Params file not found on FE: ${FE_PARAMS_PATH}"
+
+# Create done.txt if missing (Case 1)
+if [[ ! -f ${FE_DONE_FILE} ]]; then
+	: >"${FE_DONE_FILE}"
+fi
+
+declare -A __done_map=()
+while IFS= read -r __dline || [[ -n ${__dline} ]]; do
+	[[ -n ${__dline//[[:space:]]/} ]] || continue
+	__done_map["${__dline}"]=1
+done <"${FE_DONE_FILE}"
+
+declare -a SELECTED_FE_LINES=()
+while IFS= read -r __pline || [[ -n ${__pline} ]]; do
+	[[ -n ${__pline//[[:space:]]/} ]] || continue
+	if [[ -z ${__done_map["${__pline}"]+x} ]]; then
+		SELECTED_FE_LINES+=("${__pline}")
+		__done_map["${__pline}"]=1
+		if ((${#SELECTED_FE_LINES[@]} >= PARALLEL_N)); then
+			break
+		fi
+	fi
+done <"${FE_PARAMS_PATH}"
+
+if ((${#SELECTED_FE_LINES[@]} == 0)); then
+	log_step "Nothing left to run. Deleting ${FE_DONE_FILE} and exiting."
+	rm -f "${FE_DONE_FILE}" 2>/dev/null || true
+	exit 0
+fi
+
+log_step "Running execution with the parameters (selected on FE before deployment):"
+for __p in "${SELECTED_FE_LINES[@]}"; do
+	echo "  ${__p}"
+done
+
+# Immediately append selected lines to done.txt
+{
+	for __p in "${SELECTED_FE_LINES[@]}"; do printf '%s\n' "${__p}"; done
+} >>"${FE_DONE_FILE}"
+
+# Keep selection in-memory (no files) and prepare transfer to node via env var
+SELECTED_LINES_B64=$(printf '%s\n' "${SELECTED_FE_LINES[@]}" | base64 -w0)
+FE_SELECTION_MADE=1
+FE_BATCH_OK=0
+
+fe_revert_done() {
+	# Remove exactly one occurrence of each selected line from done.txt without creating a file with the lines
+	local tmp_out
+	tmp_out="${FE_DONE_FILE}.tmp.$$"
+	awk -v list="${SELECTED_LINES_B64}" '
+		BEGIN { n = split(list_dec(list), arr, "\n"); for (i=1;i<=n;i++) if (length(arr[i])) c[arr[i]]++ }
+		function list_dec(s,   cmd, out) { cmd = "echo \"" s "\" | base64 -d"; cmd | getline out; close(cmd); return out }
+		{ if (c[$0] > 0) { c[$0]--; next } print }
+	' "${FE_DONE_FILE}" >"${tmp_out}" && mv "${tmp_out}" "${FE_DONE_FILE}" || true
+}
 
 # --- Phase 1: Machine instantiation (on FE) ---
 log_step "Phase 1/4: Machine instantiation (${IS_MANUAL:+manual})"
@@ -203,7 +457,7 @@ PREP_FE_DIR="${BIN_DIR}/project-preparation/on-fe"
 if ssh -o BatchMode=yes -o StrictHostKeyChecking=no "root@${NODE_NAME}" 'echo ok' >/dev/null 2>&1; then
 	log "Running on-node preparation script remotely"
 	LOG_FILE="${LOG_DIR}/prepare_on_machine.log" ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" \
-		"bash -lc '~/experiments_node/on-machine/prepare_on_machine.sh'"
+		"bash -lc 'export SELECTED_PARAMS_B64=${SELECTED_LINES_B64:-}; ~/experiments_node/on-machine/prepare_on_machine.sh'"
 else
 	log "SSH not available. Please run on the node: ~/experiments_node/on-machine/prepare_on_machine.sh"
 fi
@@ -233,8 +487,11 @@ if ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" 'echo ok' >/dev/null 2>&1
 	fi
 
 	# Run delegator synchronously; its stdout will also appear locally
+	set +e
 	LOG_FILE="${LOG_DIR}/delegator.log" ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" \
-		"bash -lc 'if command -v stdbuf >/dev/null 2>&1; then STDBUF_PREFIX="stdbuf -oL -eL "; fi; CONFIG_JSON=~/experiments_node/config.json ${STDBUF_PREFIX:-}~/experiments_node/on-machine/run_delegator.sh'"
+		"bash -lc 'if command -v stdbuf >/dev/null 2>&1; then STDBUF_PREFIX="stdbuf -oL -eL "; fi; export SELECTED_PARAMS_B64=${SELECTED_LINES_B64:-}; CONFIG_JSON=~/experiments_node/config.json ${STDBUF_PREFIX:-}~/experiments_node/on-machine/run_delegator.sh'"
+	deleg_rc=$?
+	set -e
 
 	# Stop streaming once delegator completes
 	if [[ -n ${STREAM_PID:-} ]]; then
@@ -243,15 +500,24 @@ if ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" 'echo ok' >/dev/null 2>&1
 		unset STREAM_PID
 		log_info "Stopped remote log stream from ${NODE_NAME}"
 	fi
+
+	# If delegator failed and FE selection was made, revert done.txt lines selected for this batch
+	if [[ ${deleg_rc:-0} -ne 0 && ${FE_SELECTION_MADE:-0} -eq 1 && ${FE_BATCH_OK:-0} -eq 0 ]]; then
+		log_warn "Delegator failed; reverting FE done.txt entries for the current batch."
+		fe_revert_done
+	else
+		FE_BATCH_OK=1
+	fi
 else
 	log "SSH not available. Please run on the node: CONFIG_JSON=~/experiments_node/config.json ~/experiments_node/on-machine/run_delegator.sh"
 fi
 
-# --- Phase 4: Collect (strategy executed on node as part of delegator). Pull results ---
-log_step "Phase 4/4: Collection phase handled by delegator (strategy: ${COLLECT_STRAT:-none})"
+# --- Phase 4: Transfer results (.txt files) from node to FE ---
+log_step "Phase 4/4: Transferring .txt result files from node to FE"
 
-if [[ -n ${COLLECT_STRAT} && -n ${COLLECT_FE_DIR} ]]; then
-	COMBINED_ON_NODE="/root/experiments_node/on-machine/combined_results.txt"
+# We copy each individual .txt file from the configured node results directory
+# to the configured FE collected directory. No concatenation.
+if [[ -n ${COLLECT_FE_DIR} && -n ${COLLECT_MACHINE_DIR} ]]; then
 	# Resolve FE target dir (under experiments-runner/collected unless absolute)
 	if [[ ${COLLECT_FE_DIR} == /* ]]; then
 		FE_TARGET_DIR="${COLLECT_FE_DIR}"
@@ -259,13 +525,33 @@ if [[ -n ${COLLECT_STRAT} && -n ${COLLECT_FE_DIR} ]]; then
 		FE_TARGET_DIR="${RUNNER_ROOT}/collected/${COLLECT_FE_DIR}"
 	fi
 	mkdir -p "${FE_TARGET_DIR}"
-	if ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" "test -f '${COMBINED_ON_NODE}'"; then
-		log_info "Pulling combined results from node"
-		scp -o StrictHostKeyChecking=no "root@${NODE_NAME}:${COMBINED_ON_NODE}" "${FE_TARGET_DIR}/combined_results.txt" | tee -a "${LOG_DIR}/collector_pull.log" || true
-		log_success "Combined results saved at: ${FE_TARGET_DIR}/combined_results.txt"
+
+	# List .txt files on node within the specified directory (non-recursive)
+	REMOTE_DIR_NO_TRAIL="${COLLECT_MACHINE_DIR%/}"
+	# Use find for robust matching even if no files exist
+	mapfile -t REMOTE_TXT_FILES < <(ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" \
+		"bash -lc 'find \"${REMOTE_DIR_NO_TRAIL}\" -maxdepth 1 -type f -name \"*.txt\" -print 2>/dev/null'" || true)
+
+	if ((${#REMOTE_TXT_FILES[@]} == 0)); then
+		log_warn "No .txt result files found on node at ${REMOTE_DIR_NO_TRAIL}."
 	else
-		log_warn "No combined results found on node at ${COMBINED_ON_NODE} (collector may be disabled)."
+		log_info "Found ${#REMOTE_TXT_FILES[@]} .txt files on node; starting transfer to ${FE_TARGET_DIR}"
+		copied=0
+		for rf in "${REMOTE_TXT_FILES[@]}"; do
+			# Copy one file at a time, preserving filename into FE_TARGET_DIR
+			if scp -o StrictHostKeyChecking=no "root@${NODE_NAME}:${rf}" "${FE_TARGET_DIR}/" | tee -a "${LOG_DIR}/collector_pull.log"; then
+				((copied++)) || true
+			else
+				log_warn "Failed to copy ${rf}"
+			fi
+		done
+		log_success "Transferred ${copied}/${#REMOTE_TXT_FILES[@]} .txt files to ${FE_TARGET_DIR}"
 	fi
+else
+	log_info "Result transfer skipped: missing paths. on-node='${COLLECT_MACHINE_DIR:-}' on-FE='${COLLECT_FE_DIR:-}'"
 fi
 
 log_success "All phases completed. Logs at: ${LOG_DIR}"
+
+# Mark FE selection success so done.txt batch is retained
+FE_BATCH_OK=1

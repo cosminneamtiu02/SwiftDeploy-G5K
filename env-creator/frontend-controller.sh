@@ -50,15 +50,21 @@ if [[ -f ${DEPLOYED_NODE_FILE} ]]; then
 	rm -f "${DEPLOYED_NODE_FILE}"
 fi
 
-# -------- PRE-CHECK 2: Ensure target files do not already exist --------
-if [[ -f ${TAR_FILE} ]]; then
-	echo "ERROR: Tar file ${TAR_FILE} already exists. Please remove or rename it before running."
-	exit 1
-fi
-
-if [[ -f ${YAML_FILE} ]]; then
-	echo "ERROR: YAML file ${YAML_FILE} already exists. Please remove or rename it before running."
-	exit 1
+# -------- PRE-CHECK 2: Update-in-create behavior --------
+if [[ -f ${TAR_FILE} || -f ${YAML_FILE} ]]; then
+	echo "Detected existing artifacts for ${GENERAL_NAME}:"
+	[[ -f ${TAR_FILE} ]] && echo " - TAR:  ${TAR_FILE}"
+	[[ -f ${YAML_FILE} ]] && echo " - YAML: ${YAML_FILE}"
+	read -r -p "They already exist. Do you want to update (recreate) them? [y/N]: " REPLY
+	REPLY=${REPLY:-}
+	if [[ ${REPLY} =~ ^[Yy]$ ]]; then
+		echo "Updating image: removing old artifacts..."
+		[[ -f ${TAR_FILE} ]] && rm -f -- "${TAR_FILE}"
+		[[ -f ${YAML_FILE} ]] && rm -f -- "${YAML_FILE}"
+	else
+		echo "ERROR: Image artifacts already exist and were not overwritten. Aborting."
+		exit 1
+	fi
 fi
 
 if [[ ! -f ${LOCAL_SCRIPT_PATH} ]]; then

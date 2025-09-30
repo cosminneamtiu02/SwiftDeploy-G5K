@@ -76,11 +76,18 @@ if ! remote_mkdir_via_ssh "${NODE_NAME}" "${REMOTE_LOGS_DIR}"; then
 	log_warn "SSH not ready on ${NODE_NAME}. Skipping remote logs mkdir."
 fi
 
-# Upload config and params
+# Upload config and params (use FE-selected params if provided via SELECTED_BATCH)
 log_info "Uploading config and params"
 if ssh -o BatchMode=yes -o StrictHostKeyChecking=no "root@${NODE_NAME}" 'echo ok' >/dev/null 2>&1; then
 	scp -o StrictHostKeyChecking=no "${CONFIG_PATH}" "root@${NODE_NAME}:${REMOTE_BASE}/config.json"
-	scp -o StrictHostKeyChecking=no "${PAR_FILE}" "root@${NODE_NAME}:${REMOTE_BASE}/params.txt"
+	if [[ -n ${SELECTED_BATCH:-} ]]; then
+		log_info "Using FE-selected batch parameters for this run"
+		# Send only the selected lines
+		printf '%s\n' "${SELECTED_BATCH}" | ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" "cat > ${REMOTE_BASE}/params.txt"
+	else
+		# Fallback: send full params file
+		scp -o StrictHostKeyChecking=no "${PAR_FILE}" "root@${NODE_NAME}:${REMOTE_BASE}/params.txt"
+	fi
 else
 	log_warn "SSH not ready on ${NODE_NAME}. Skipping upload."
 fi

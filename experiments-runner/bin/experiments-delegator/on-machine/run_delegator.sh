@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Runs on node. Reads params and runs experiments in parallel, then runs collection strategy.
-set -euo pipefail
+# Runs on node. Reads params and runs experiments in parallel, with tracker handling and collection strategy.
+set -Eeuo pipefail
 IFS=$'\n\t'
 
 BASE_DIR="/root/experiments_node"
@@ -48,44 +48,96 @@ else
 	BUF_PREFIX=""
 fi
 
-# Build todo vs done sets
-mapfile -t todo < <(grep -v '^[[:space:]]*$' "${PARAMS_FILE}" || true)
-if [[ -f ${TRACKER_FILE} ]]; then
-	mapfile -t already_done < <(grep -v '^[[:space:]]*$' "${TRACKER_FILE}" || true)
+batch=()
+if [[ -n ${SELECTED_PARAMS_B64:-} ]]; then
+	# FE-side selection provided
+	# Decode first to avoid masking return codes in process substitution (SC2312)
+	if ! decoded_params=$(printf '%s' "${SELECTED_PARAMS_B64}" | base64 -d); then
+		die "Failed to decode SELECTED_PARAMS_B64"
+	fi
+	mapfile -t batch <<<"${decoded_params}"
 else
-	already_done=()
-fi
+	# Build todo vs done sets on node
+	mapfile -t todo < <(grep -v '^[[:space:]]*$' "${PARAMS_FILE}" || true)
+	if [[ -f ${TRACKER_FILE} ]]; then
+		mapfile -t already_done < <(grep -v '^[[:space:]]*$' "${TRACKER_FILE}" || true)
+	else
+		already_done=()
+	fi
 
-# Compute remaining by filtering todo - done
-remaining=()
-for line in "${todo[@]}"; do
-	skip=false
-	for d in "${already_done[@]}"; do
-		if [[ ${line} == "${d}" ]]; then
-			skip=true
-			break
+	# Compute remaining by filtering todo - done
+	remaining=()
+	for line in "${todo[@]}"; do
+		skip=false
+		for d in "${already_done[@]}"; do
+			if [[ ${line} == "${d}" ]]; then
+				skip=true
+				break
+			fi
+		done
+		if ! ${skip}; then
+			remaining+=("${line}")
 		fi
 	done
-	if ! ${skip}; then
-		remaining+=("${line}")
-	fi
-done
 
-if [[ ${#remaining[@]} -eq 0 ]]; then
-	log "No remaining experiments to run. Exiting."
-	exit 0
+	if [[ ${#remaining[@]} -eq 0 ]]; then
+		log "No more lines left to run experiments on. Exiting."
+		exit 0
+	fi
+
+	# Take up to PARALLEL_N lines
+	for ((i = 0; i < ${#remaining[@]} && i < PARALLEL_N; i++)); do
+		batch+=("${remaining[${i}]}")
+	done
 fi
 
-# Take up to PARALLEL_N lines
-batch=()
-for ((i = 0; i < ${#remaining[@]} && i < PARALLEL_N; i++)); do
-	batch+=("${remaining[${i}]}")
-	echo "${remaining[${i}]}" >>"${TRACKER_FILE}"
+# Log batch parameters prominently and write them immediately to tracker
+log "Running execution with the parameters:"
+for p in "${batch[@]}"; do
+	log "${p}"
+done
+
+# Keep a mark of lines we add to tracker, so we can revert on failure or interruption
+BATCH_MARK_FILE="${LOGS_DIR}/.current_batch_$$.txt"
+: >"${BATCH_MARK_FILE}"
+# Success flag and revert guard
+BATCH_OK=0
+REVERT_DONE=0
+for p in "${batch[@]}"; do
+	printf '%s\n' "${p}" | tee -a "${TRACKER_FILE}" >>"${BATCH_MARK_FILE}"
 done
 
 log "Launching ${#batch[@]} experiments (parallel=${PARALLEL_N}) in ${EXEC_DIR}"
 
 cd "${EXEC_DIR}" || die "Cannot cd to ${EXEC_DIR}"
+
+# Revert tracker entries added for this batch (exact occurrences) — used on failure/interrupt
+revert_tracker_entries() {
+	[[ -s ${BATCH_MARK_FILE} && -f ${TRACKER_FILE} ]] || return 0
+	tmp_trk="${TRACKER_FILE}.tmp.$$"
+	# Remove exactly one occurrence of each line listed in BATCH_MARK_FILE
+	awk 'BEGIN{ while((getline line<ARGV[2])>0){c[line]++} close(ARGV[2]) } { if(c[$0]>0){ c[$0]--; next } print }' \
+		"${TRACKER_FILE}" "${BATCH_MARK_FILE}" >"${tmp_trk}" && mv "${tmp_trk}" "${TRACKER_FILE}" || true
+	REVERT_DONE=1
+}
+
+on_fail_or_interrupt() {
+	err "Execution failed or interrupted. Reverting tracker entries for current batch."
+	revert_tracker_entries
+	exit 1
+}
+
+on_exit() {
+	# If not marked success and we haven't reverted yet (e.g., SIGHUP), revert now
+	if [[ ${BATCH_OK} -ne 1 && ${REVERT_DONE} -ne 1 ]]; then
+		err "Exiting without success; reverting tracker entries for current batch."
+		revert_tracker_entries
+	fi
+	rm -f "${BATCH_MARK_FILE}" 2>/dev/null || true
+}
+
+trap on_fail_or_interrupt ERR INT TERM HUP
+trap on_exit EXIT
 
 # Prefer GNU parallel if exists
 if command -v parallel >/dev/null 2>&1; then
@@ -112,6 +164,8 @@ else
 		fi
 	done
 	if [[ ${status} -ne 0 ]]; then
+		# Revert tracker entries for this batch on failure
+		revert_tracker_entries
 		die "At least one experiment failed"
 	fi
 fi
@@ -125,3 +179,6 @@ else
 fi
 
 log "Delegator done."
+
+# Mark success so EXIT trap does not revert
+BATCH_OK=1
