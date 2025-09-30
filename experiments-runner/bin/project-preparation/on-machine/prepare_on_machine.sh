@@ -93,6 +93,27 @@ for ((i = 0; i < count; i++)); do
 	log "Set ${key}"
 done
 
+# Validate common dataset variables if present
+if [[ -n ${CK_PLUS_CSV_PATH:-} ]]; then
+	if [[ -f ${CK_PLUS_CSV_PATH} ]]; then
+		log "Detected CK_PLUS_CSV_PATH=${CK_PLUS_CSV_PATH} (file exists)"
+	else
+		err "CK_PLUS_CSV_PATH=${CK_PLUS_CSV_PATH} does not exist on node"
+	fi
+else
+	log "CK_PLUS_CSV_PATH not provided in config env_variables_list"
+fi
+
+if [[ -n ${CK_PLUS_IMAGES_DIR:-} ]]; then
+	if [[ -d ${CK_PLUS_IMAGES_DIR} ]]; then
+		log "Detected CK_PLUS_IMAGES_DIR=${CK_PLUS_IMAGES_DIR} (dir exists)"
+	else
+		err "CK_PLUS_IMAGES_DIR=${CK_PLUS_IMAGES_DIR} does not exist on node"
+	fi
+else
+	log "CK_PLUS_IMAGES_DIR not provided in config env_variables_list"
+fi
+
 # Optionally install libraries if provided under machine_setup.list_of_needed_libraries
 LIST_FILE=$(jq -r '.machine_setup.list_of_needed_libraries // empty' "${CONFIG_JSON}")
 if [[ -n ${LIST_FILE} && -f ${LIST_FILE} ]]; then
