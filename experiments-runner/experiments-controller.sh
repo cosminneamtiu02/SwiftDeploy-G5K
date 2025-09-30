@@ -66,6 +66,11 @@ export LOG_FILE
 source "${RUNNER_ROOT}/bin/utils/liblog.sh"
 log_info "Controller started. Logs: ${LOG_FILE}"
 
+# Backward-compat: if plain 'log' isn't defined by the logging lib, map it to info
+if ! declare -F log >/dev/null 2>&1; then
+	log() { log_info "$@"; }
+fi
+
 require_cmd() { command -v "$1" >/dev/null 2>&1 || die "Missing required command: $1"; }
 
 # --- Optional verbose tracing ---
