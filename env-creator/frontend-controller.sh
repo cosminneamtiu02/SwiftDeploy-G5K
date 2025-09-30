@@ -30,18 +30,18 @@ fi
 source "${CONFIG_PATH}"
 
 # -------- DERIVED VARIABLES (from sourced config) --------
-# TAR file path (under user's home)
-TAR_FILE="${HOME}/envs/${GENERAL_NAME}.tar.zst"
+# TAR file path (under user's home in dedicated img folder)
+TAR_BASE_DIR="${HOME}/envs/img"
+TAR_FILE="${TAR_BASE_DIR}/${GENERAL_NAME}.tar.zst"
 # Directory where generated YAML files will be stored. Can be overridden by
 # setting YAML_OUTPUT_DIR in the environment before running this script.
-# Default is a repo-relative folder so generated YAMLs are kept together and
-# can be ignored from commits.
-YAML_OUTPUT_DIR="${YAML_OUTPUT_DIR:-${REPO_ROOT}/experiments-runner/generated-yamls}"
+# Default is ${HOME}/envs/img-files so that deployment uses kadeploy3 -a from there.
+YAML_OUTPUT_DIR="${YAML_OUTPUT_DIR:-${HOME}/envs/img-files}"
 YAML_FILE="${YAML_OUTPUT_DIR}/${GENERAL_NAME}.yaml"
 LOCAL_SCRIPT_PATH="${NODE_SCRIPT_DIR}/${SETUP_SCRIPT}"
 
-# Ensure the TAR directory and YAML output directory exist (relative to home/repo)
-mkdir -p "${HOME}/envs"
+# Ensure the TAR directory and YAML output directory exist (relative to home)
+mkdir -p "${TAR_BASE_DIR}"
 mkdir -p "${YAML_OUTPUT_DIR}"
 
 # -------- PRE-CHECK 1: Clean up leftover node file if present --------
@@ -143,7 +143,7 @@ sed -i "/^name:/c\name: ${YAML_NAME}" "${YAML_FILE}"
 sed -i "/^alias:/c\alias: ${YAML_ALIAS}" "${YAML_FILE}"
 sed -i "/^description:/c\description : ${YAML_DESCRIPTION}" "${YAML_FILE}"
 sed -i "/^author:/c\author: ${YAML_AUTHOR}" "${YAML_FILE}"
-# Update the file: entry to point to the actual TAR file path
+# Update the file: entry to point to the actual TAR file path in ${HOME}/envs/img
 sed -i "/^\s*file:/c\  file: ${TAR_FILE}" "${YAML_FILE}"
 
 echo "Script finished successfully."
