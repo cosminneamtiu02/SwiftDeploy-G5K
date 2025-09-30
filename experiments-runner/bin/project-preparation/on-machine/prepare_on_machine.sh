@@ -26,7 +26,48 @@ die() {
 
 require_cmd() { command -v "$1" >/dev/null 2>&1 || die "Missing required command: $1"; }
 
-require_cmd jq
+# Ensure jq exists (install if missing)
+ensure_jq() {
+	if command -v jq >/dev/null 2>&1; then
+		return 0
+	fi
+	log "jq not found; attempting to install..."
+	# Try package manager detection first
+	if command -v apt-get >/dev/null 2>&1; then
+		bash -lc 'DEBIAN_FRONTEND=noninteractive apt-get update -y && apt-get install -y jq' || true
+	elif command -v dnf >/dev/null 2>&1; then
+		bash -lc 'dnf makecache && dnf install -y jq' || true
+	elif command -v yum >/dev/null 2>&1; then
+		bash -lc 'yum makecache fast && yum install -y jq' || true
+	else
+		log "No known package manager detected; will try OS_TYPE fallback if available."
+		# Fall back to OS_TYPE-based installer below
+	fi
+	if command -v jq >/dev/null 2>&1; then
+		log "jq installation successful"
+		return 0
+	fi
+
+	# Fallback to OS_TYPE if direct detection failed
+	os_t="${OS_TYPE:-1}"
+	case "${os_t}" in
+		1)
+			bash -lc 'DEBIAN_FRONTEND=noninteractive apt-get update -y && apt-get install -y jq' || true
+			;;
+		2)
+			bash -lc 'yum makecache fast && yum install -y jq' || true
+			;;
+		3)
+			bash -lc 'dnf makecache && dnf install -y jq' || true
+			;;
+		*)
+			log "Unknown OS_TYPE=${os_t}; cannot auto-install jq via fallback."
+			;;
+	esac
+	if ! command -v jq >/dev/null 2>&1; then
+		die "Missing required command: jq (auto-install failed). Please include jq in the image or provide it via machine_setup.list_of_needed_libraries."
+	fi
+}
 
 [[ -f ${CONFIG_JSON} ]] || die "Missing ${CONFIG_JSON}"
 [[ -f ${PARAMS_FILE} ]] || die "Missing ${PARAMS_FILE}"
@@ -35,6 +76,9 @@ OS_TYPE=1
 if [[ -f ${OS_TYPE_FILE} ]]; then
 	OS_TYPE=$(cat "${OS_TYPE_FILE}")
 fi
+
+# Ensure jq is available before using it
+ensure_jq
 
 # Persist env vars
 log "Persisting environment variables to ${ENV_FILE}"
