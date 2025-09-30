@@ -41,6 +41,13 @@ PARALLEL_N=$(jq -r '.running_experiments.number_of_experiments_to_run_in_paralle
 mkdir -p "${LOGS_DIR}"
 : >"${LOGS_DIR}/delegator.log"
 
+# Prefer line-buffered output so streams appear live on the FE even when stdout is a pipe
+if command -v stdbuf >/dev/null 2>&1; then
+	BUF_PREFIX="stdbuf -oL -eL"
+else
+	BUF_PREFIX=""
+fi
+
 # Build todo vs done sets
 mapfile -t todo < <(grep -v '^[[:space:]]*$' "${PARAMS_FILE}" || true)
 if [[ -f ${TRACKER_FILE} ]]; then
@@ -84,15 +91,17 @@ cd "${EXEC_DIR}" || die "Cannot cd to ${EXEC_DIR}"
 if command -v parallel >/dev/null 2>&1; then
 	# Stream outputs to both console and delegator.log so FE tail can display them nicely
 	printf '%s\n' "${batch[@]}" |
-		sed -e "s#^#${EXEC_CMD} #" |
-		parallel -j "${PARALLEL_N}" --halt soon,fail=1 2>&1 |
+		sed -e "s#^#${BUF_PREFIX} ${EXEC_CMD} #" |
+		parallel -j "${PARALLEL_N}" --line-buffer --halt soon,fail=1 2>&1 |
 		tee -a "${LOGS_DIR}/delegator.log"
 else
 	pids=()
 	for params in "${batch[@]}"; do
-		# Running in background; capturing command's output, so SC2312 is not applicable here.
+		# Run in background and stream both stdout/stderr to delegator.log AND to a per-run .out file
+		# Using tee so FE-side tail of delegator.log captures live lines even without GNU parallel
 		# shellcheck disable=SC2312
-		sh -c "${EXEC_CMD} ${params}" >"${LOGS_DIR}/$(date +%s)_$(echo "${params}" | tr ' ' '_').out" 2>&1 &
+		outfile="${LOGS_DIR}/$(date +%s)_$(echo "${params}" | tr ' ' '_').out"
+		sh -c "${BUF_PREFIX} ${EXEC_CMD} ${params}" 2>&1 | tee -a "${LOGS_DIR}/delegator.log" >"${outfile}" &
 		pids+=("$!")
 	done
 	# wait for all

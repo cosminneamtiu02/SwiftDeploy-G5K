@@ -210,25 +210,31 @@ fi
 
 # --- Phase 3: Delegate experiments ---
 log_step "Phase 3/4: Delegating experiments on node"
-DELEG_CMD="bash -lc 'CONFIG_JSON=~/experiments_node/config.json ~/experiments_node/on-machine/run_delegator.sh'"
 if ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" 'echo ok' >/dev/null 2>&1; then
 	# Start streaming remote logs to FE console
 	if command -v stdbuf >/dev/null 2>&1; then
 		log_info "Starting remote log stream from ${NODE_NAME} (${REMOTE_LOGS_DIR})"
 		ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" \
-			"bash -lc 'mkdir -p ${REMOTE_LOGS_DIR}; touch ${REMOTE_LOGS_DIR}/delegator.log ${REMOTE_LOGS_DIR}/collector.log; stdbuf -oL -eL tail -n +1 -F ${REMOTE_LOGS_DIR}/delegator.log ${REMOTE_LOGS_DIR}/collector.log ${REMOTE_LOGS_DIR}/*.out 2>/dev/null'" |
-			while IFS= read -r line; do log_info "[${NODE_NAME}] ${line}"; done &
+			"bash -lc 'shopt -s nullglob; mkdir -p ${REMOTE_LOGS_DIR}; touch ${REMOTE_LOGS_DIR}/delegator.log ${REMOTE_LOGS_DIR}/collector.log; stdbuf -oL -eL tail -v -n +1 -F ${REMOTE_LOGS_DIR}/delegator.log ${REMOTE_LOGS_DIR}/collector.log 2>/dev/null'" |
+			while IFS= read -r line; do
+				ts=$(date +%H:%M:%S)
+				echo "[${ts}] [INFO]  [${NODE_NAME}] ${line}"
+			done &
 		STREAM_PID=$!
 	else
 		log_warn "stdbuf not available on FE; log streaming may be buffered."
 		ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" \
-			"bash -lc 'mkdir -p ${REMOTE_LOGS_DIR}; touch ${REMOTE_LOGS_DIR}/delegator.log ${REMOTE_LOGS_DIR}/collector.log; tail -n +1 -F ${REMOTE_LOGS_DIR}/delegator.log ${REMOTE_LOGS_DIR}/collector.log ${REMOTE_LOGS_DIR}/*.out 2>/dev/null'" |
-			while IFS= read -r line; do log_info "[${NODE_NAME}] ${line}"; done &
+			"bash -lc 'shopt -s nullglob; mkdir -p ${REMOTE_LOGS_DIR}; touch ${REMOTE_LOGS_DIR}/delegator.log ${REMOTE_LOGS_DIR}/collector.log; tail -v -n +1 -F ${REMOTE_LOGS_DIR}/delegator.log ${REMOTE_LOGS_DIR}/collector.log 2>/dev/null'" |
+			while IFS= read -r line; do
+				ts=$(date +%H:%M:%S)
+				echo "[${ts}] [INFO]  [${NODE_NAME}] ${line}"
+			done &
 		STREAM_PID=$!
 	fi
 
 	# Run delegator synchronously; its stdout will also appear locally
-	LOG_FILE="${LOG_DIR}/delegator.log" ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" "${DELEG_CMD}"
+	LOG_FILE="${LOG_DIR}/delegator.log" ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" \
+		"bash -lc 'if command -v stdbuf >/dev/null 2>&1; then STDBUF_PREFIX="stdbuf -oL -eL "; fi; CONFIG_JSON=~/experiments_node/config.json ${STDBUF_PREFIX:-}~/experiments_node/on-machine/run_delegator.sh'"
 
 	# Stop streaming once delegator completes
 	if [[ -n ${STREAM_PID:-} ]]; then
