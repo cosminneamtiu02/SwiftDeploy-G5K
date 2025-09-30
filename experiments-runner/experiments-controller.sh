@@ -12,6 +12,7 @@ LOGS_DIR_BASE="${RUNNER_ROOT}/logs"
 CONFIGS_DIR_PRIMARY="${RUNNER_ROOT}/experiments-configurations"
 CONFIGS_DIR_IMPL="${CONFIGS_DIR_PRIMARY}/implementations"
 CURRENT_NODE_FILE="${RUNNER_ROOT}/current_node.txt"
+ALT_NODE_FILE="${REPO_ROOT}/current_node.txt"
 
 # --- CLI args ---
 CONFIG_NAME=""
@@ -112,7 +113,14 @@ else
 	fi
 fi
 
-[[ -f ${CURRENT_NODE_FILE} ]] || die "Node name file not found: ${CURRENT_NODE_FILE}"
+# Fallback: accept legacy path at repo root if present
+if [[ ! -f ${CURRENT_NODE_FILE} ]]; then
+	if [[ -f ${ALT_NODE_FILE} ]]; then
+		CURRENT_NODE_FILE=${ALT_NODE_FILE}
+	else
+		die "Node name file not found: ${CURRENT_NODE_FILE}"
+	fi
+fi
 NODE_NAME=$(<"${CURRENT_NODE_FILE}")
 [[ -n ${NODE_NAME} ]] || die "Empty node name in ${CURRENT_NODE_FILE}"
 log "Target node: ${NODE_NAME}"

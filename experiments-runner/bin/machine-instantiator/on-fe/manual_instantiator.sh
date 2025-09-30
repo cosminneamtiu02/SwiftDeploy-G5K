@@ -13,7 +13,8 @@ if [[ -z ${YAML_NAME} ]]; then
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-RUNNER_ROOT="$(cd "${SCRIPT_DIR}/../../../.." && pwd)"
+# From on-fe -> machine-instantiator -> bin -> experiments-runner (3 levels up)
+RUNNER_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 CURRENT_NODE_FILE="${RUNNER_ROOT}/current_node.txt"
 YAML_DIR="${HOME}/envs/img-files"
 YAML_PATH="${YAML_DIR}/${YAML_NAME}"
