@@ -26,3 +26,5 @@ Thumbs.db
 experiments-runner/generated-yamls/
 
 grid5k-csnn/
+
+experiments-runner/CHECKLIST.txt
