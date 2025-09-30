@@ -58,15 +58,12 @@ timestamp() { date +"%Y-%m-%d_%H-%M-%S"; }
 LOG_DIR="${LOGS_DIR_BASE}/$(timestamp)"
 mkdir -p "${LOG_DIR}"
 
-log() {
-	local ts
-	ts=$(date +"%H:%M:%S")
-	echo "[${ts}] $*" | tee -a "${LOG_DIR}/controller.log"
-}
-die() {
-	echo "FATAL: $*" | tee -a "${LOG_DIR}/controller.log" >&2
-	exit 1
-}
+# shellcheck source=/dev/null
+LOG_FILE="${LOG_DIR}/controller.log"
+export LOG_FILE
+# shellcheck disable=SC1091
+source "${RUNNER_ROOT}/bin/utils/liblog.sh"
+log_info "Controller started. Logs: ${LOG_FILE}"
 
 require_cmd() { command -v "$1" >/dev/null 2>&1 || die "Missing required command: $1"; }
 
@@ -102,7 +99,7 @@ COLLECT_MACHINE_DIR=$(jq_get '.running_experiments.experiments_collection.path_t
 [[ ${PARALLEL_N} =~ ^[0-9]+$ ]] || die "number_of_experiments_to_run_in_parallel_on_machine must be an integer"
 
 # --- Phase 1: Machine instantiation (on FE) ---
-log "Phase 1/4: Machine instantiation (${IS_MANUAL:+manual})"
+log_step "Phase 1/4: Machine instantiation (${IS_MANUAL:+manual})"
 INST_DIR="${BIN_DIR}/machine-instantiator/on-fe"
 [[ -d ${INST_DIR} ]] || die "Missing directory: ${INST_DIR}"
 
@@ -132,23 +129,23 @@ PREP_FE_DIR="${BIN_DIR}/project-preparation/on-fe"
 # Attempt to run prepare on node (will fallback to manual if ssh not available)
 if ssh -o BatchMode=yes -o StrictHostKeyChecking=no "root@${NODE_NAME}" 'echo ok' >/dev/null 2>&1; then
 	log "Running on-node preparation script remotely"
-	ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" \
-		"bash -lc '~/experiments_node/on-machine/prepare_on_machine.sh'" | tee -a "${LOG_DIR}/prepare_on_machine.log"
+	LOG_FILE="${LOG_DIR}/prepare_on_machine.log" ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" \
+		"bash -lc '~/experiments_node/on-machine/prepare_on_machine.sh'"
 else
 	log "SSH not available. Please run on the node: ~/experiments_node/on-machine/prepare_on_machine.sh"
 fi
 
 # --- Phase 3: Delegate experiments ---
-log "Phase 3/4: Delegating experiments on node"
+log_step "Phase 3/4: Delegating experiments on node"
 DELEG_CMD="bash -lc 'CONFIG_JSON=~/experiments_node/config.json ~/experiments_node/on-machine/run_delegator.sh'"
 if ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" 'echo ok' >/dev/null 2>&1; then
-	ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" "${DELEG_CMD}" | tee -a "${LOG_DIR}/delegator.log"
+	LOG_FILE="${LOG_DIR}/delegator.log" ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" "${DELEG_CMD}"
 else
 	log "SSH not available. Please run on the node: CONFIG_JSON=~/experiments_node/config.json ~/experiments_node/on-machine/run_delegator.sh"
 fi
 
 # --- Phase 4: Collect (strategy executed on node as part of delegator). Pull results ---
-log "Phase 4/4: Collection phase handled by delegator (strategy: ${COLLECT_STRAT:-none})"
+log_step "Phase 4/4: Collection phase handled by delegator (strategy: ${COLLECT_STRAT:-none})"
 
 if [[ -n ${COLLECT_STRAT} && -n ${COLLECT_FE_DIR} ]]; then
 	COMBINED_ON_NODE="/root/experiments_node/on-machine/combined_results.txt"
@@ -160,12 +157,12 @@ if [[ -n ${COLLECT_STRAT} && -n ${COLLECT_FE_DIR} ]]; then
 	fi
 	mkdir -p "${FE_TARGET_DIR}"
 	if ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" "test -f '${COMBINED_ON_NODE}'"; then
-		log "Pulling combined results from node"
+		log_info "Pulling combined results from node"
 		scp -o StrictHostKeyChecking=no "root@${NODE_NAME}:${COMBINED_ON_NODE}" "${FE_TARGET_DIR}/combined_results.txt" | tee -a "${LOG_DIR}/collector_pull.log" || true
-		log "Combined results saved at: ${FE_TARGET_DIR}/combined_results.txt"
+		log_success "Combined results saved at: ${FE_TARGET_DIR}/combined_results.txt"
 	else
-		log "No combined results found on node at ${COMBINED_ON_NODE} (collector may be disabled)."
+		log_warn "No combined results found on node at ${COMBINED_ON_NODE} (collector may be disabled)."
 	fi
 fi
 
-log "All phases completed. Logs at: ${LOG_DIR}"
+log_success "All phases completed. Logs at: ${LOG_DIR}"

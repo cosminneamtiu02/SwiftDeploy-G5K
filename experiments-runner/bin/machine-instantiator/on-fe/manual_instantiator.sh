@@ -13,11 +13,12 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RUNNER_ROOT="$(cd "${SCRIPT_DIR}/../../../.." && pwd)"
 CURRENT_NODE_FILE="${RUNNER_ROOT}/current_node.txt"
-YAML_DIR="${RUNNER_ROOT}/generated-yamls"
+YAML_DIR="${HOME}/envs/img-files"
 YAML_PATH="${YAML_DIR}/${YAML_NAME}"
 
 if [[ ! -f ${YAML_PATH} ]]; then
 	echo "ERROR: YAML not found at ${YAML_PATH}" >&2
+	echo "Hint: the env-creator now stores YAMLs under ~/envs/img-files and tars under ~/envs/img" >&2
 	exit 1
 fi
 
@@ -25,8 +26,8 @@ cat <<EOF
 Manual instantiation selected.
 Please ensure you have an interactive deploy shell on Grid'5000 with a node reserved, e.g.:
   oarsub -I -t deploy -q default
-Then deploy the image in that terminal:
-  kadeploy3 -e ${YAML_PATH}
+Then deploy the image in that terminal (YAML from ~/envs/img-files):
+	kadeploy3 -a ${YAML_PATH}
 After deployment completes, identify the node name (hostname). Enter it below.
 EOF
 
