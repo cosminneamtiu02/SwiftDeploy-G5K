@@ -3,7 +3,7 @@
 # - Verifies YAML exists under ~/envs/img-files
 # - Tries to detect node from OAR nodefile or oarstat
 # - Falls back to prompting the user only if detection fails
-set -euo pipefail
+set -Eeuo pipefail
 IFS=$'\n\t'
 
 YAML_NAME=${1:-}
@@ -15,19 +15,30 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # From on-fe -> machine-instantiator -> bin -> experiments-runner (3 levels up)
 RUNNER_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
+# shellcheck source=/dev/null
+source "${RUNNER_ROOT}/bin/utils/liblog.sh"
 CURRENT_NODE_FILE="${RUNNER_ROOT}/current_node.txt"
 YAML_DIR="${HOME}/envs/img-files"
 YAML_PATH="${YAML_DIR}/${YAML_NAME}"
 
 if [[ ! -f ${YAML_PATH} ]]; then
-	echo "ERROR: YAML not found at ${YAML_PATH}" >&2
-	echo "Hint: the env-creator stores YAMLs under ~/envs/img-files and tars under ~/envs/img" >&2
+	log_error "YAML not found at ${YAML_PATH}"
+	log_error "Hint: env-creator stores YAMLs under ~/envs/img-files and tars under ~/envs/img"
 	exit 1
 fi
 
-echo "Manual instantiation selected."
-echo "Expecting you already ran: oarsub -I -t deploy -q default (in another terminal)."
-echo "Will deploy image automatically if needed: kadeploy3 -a ${YAML_PATH} -m <node>"
+log_info "Manual instantiation selected."
+log_info "Ensure an interactive deploy session exists: oarsub -I -t deploy -q default (run in another terminal)."
+log_info "Will deploy image automatically if needed: kadeploy3 -a ${YAML_PATH} -m <node>"
+
+__on_err() {
+	local exit_code=$?
+	local line_no=${BASH_LINENO[0]:-?}
+	local src_file=${BASH_SOURCE[1]:-$(basename "$0")}
+	local last_cmd=${BASH_COMMAND:-unknown}
+	log_error "Instantiator failed (exit=${exit_code}) at ${src_file}:${line_no} while running: ${last_cmd}"
+}
+trap __on_err ERR
 
 detect_from_oar_env() {
 	# Try common OAR nodefile env vars
@@ -65,7 +76,7 @@ status=$?
 set -e
 if [[ ${status} -eq 0 && -n ${tmp} ]]; then
 	NODE_NAME=${tmp}
-	echo "Auto-detected node from OAR env file: ${NODE_NAME}"
+	log_info "Auto-detected node from OAR env file: ${NODE_NAME}"
 else
 	set +e
 	tmp=$(detect_from_oarstat)
@@ -73,21 +84,21 @@ else
 	set -e
 	if [[ ${status} -eq 0 && -n ${tmp} ]]; then
 		NODE_NAME=${tmp}
-		echo "Auto-detected node via oarstat: ${NODE_NAME}"
+		log_info "Auto-detected node via oarstat: ${NODE_NAME}"
 	fi
 fi
 
 if [[ -z ${NODE_NAME} ]]; then
 	read -r -p "Enter the allocated node hostname (e.g., parasilo-XX.nancy.grid5000.fr): " NODE_NAME
 	if [[ -z ${NODE_NAME} ]]; then
-		echo "No node name provided." >&2
+		log_error "No node name provided. Aborting."
 		exit 1
 	fi
 fi
 
 printf '%s\n' "${NODE_NAME}" >"${CURRENT_NODE_FILE}"
 chmod 600 "${CURRENT_NODE_FILE}"
-echo "Saved node to ${CURRENT_NODE_FILE}: ${NODE_NAME}"
+log_info "Saved node to ${CURRENT_NODE_FILE}: ${NODE_NAME}"
 
 # Deploy the image to the allocated node if SSH isn't ready yet
 wait_for_ssh() {
@@ -109,23 +120,23 @@ wait_for_ssh() {
 
 if ! ssh -o BatchMode=yes -o StrictHostKeyChecking=no "root@${NODE_NAME}" 'echo ok' >/dev/null 2>&1; then
 	if command -v kadeploy3 >/dev/null 2>&1; then
-		echo "SSH on ${NODE_NAME} not ready. Deploying image via kadeploy3..."
+		log_warn "SSH on ${NODE_NAME} not ready. Deploying image via kadeploy3..."
 		# Prefer targeting the specific node to avoid ambiguity
 		if ! kadeploy3 -a "${YAML_PATH}" -m "${NODE_NAME}"; then
-			echo "kadeploy3 failed on ${NODE_NAME}" >&2
+			log_error "kadeploy3 failed on ${NODE_NAME}"
 			exit 1
 		fi
-		echo "Waiting for SSH to become available on ${NODE_NAME}..."
+		log_info "Waiting for SSH to become available on ${NODE_NAME}..."
 		set +e
 		wait_for_ssh "${NODE_NAME}" 600
 		wst=$?
 		set -e
 		if [[ ${wst} -ne 0 ]]; then
-			echo "Timed out waiting for SSH on ${NODE_NAME}" >&2
+			log_error "Timed out waiting for SSH on ${NODE_NAME}"
 			exit 1
 		fi
-		echo "SSH is now available on ${NODE_NAME}."
+		log_success "SSH is now available on ${NODE_NAME}."
 	else
-		echo "kadeploy3 not found. Please deploy manually: kadeploy3 -a ${YAML_PATH} -m ${NODE_NAME}" >&2
+		log_warn "kadeploy3 not found. Deploy manually: kadeploy3 -a ${YAML_PATH} -m ${NODE_NAME}"
 	fi
 fi

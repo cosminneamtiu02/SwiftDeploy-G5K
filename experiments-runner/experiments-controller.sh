@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Orchestrates: machine instantiation -> project preparation -> delegate runs -> collect
 # Usage: experiments-controller.sh --config <config_name.json> [--verbose]
-set -euo pipefail
+set -Eeuo pipefail
 IFS=$'\n\t'
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -73,10 +73,21 @@ fi
 
 require_cmd() { command -v "$1" >/dev/null 2>&1 || die "Missing required command: $1"; }
 
-# --- Optional verbose tracing ---
+# --- Optional verbose mode (debug-level logs, no shell tracing noise) ---
 if ${VERBOSE}; then
-	set -x
+	export LOG_LEVEL=debug
 fi
+
+# --- Error trap for clearer failures ---
+__on_err() {
+	local exit_code=$?
+	local line_no=${BASH_LINENO[0]:-?}
+	local src_file=${BASH_SOURCE[1]:-$(basename "$0")}
+	local last_cmd=${BASH_COMMAND:-unknown}
+	log_error "Failure (exit=${exit_code}) at ${src_file}:${line_no} while running: ${last_cmd}"
+	log_error "See ${LOG_FILE} for details."
+}
+trap __on_err ERR
 
 # --- Dependencies ---
 require_cmd jq
@@ -98,11 +109,11 @@ COLLECT_FE_DIR=$(jq_get '.running_experiments.experiments_collection.path_to_sav
 # shellcheck disable=SC2034 # retained for future use / debugging
 COLLECT_MACHINE_DIR=$(jq_get '.running_experiments.experiments_collection.path_to_saved_experiment_results_on_machine // empty')
 
-[[ -n ${IMAGE_YAML_NAME} ]] || die "image_to_use missing in config"
-[[ -n ${PAR_PATH} ]] || die "to_do_parameters_list_path missing in config"
-[[ -n ${EXEC_CMD} ]] || die "execute_command missing in config"
-[[ -n ${EXEC_DIR} ]] || die "full_path_to_executable missing in config"
-[[ ${PARALLEL_N} =~ ^[0-9]+$ ]] || die "number_of_experiments_to_run_in_parallel_on_machine must be an integer"
+[[ -n ${IMAGE_YAML_NAME} ]] || die "Config error: .machine_setup.image_to_use is missing or empty"
+[[ -n ${PAR_PATH} ]] || die "Config error: .running_experiments.on_fe.to_do_parameters_list_path is missing or empty"
+[[ -n ${EXEC_CMD} ]] || die "Config error: .running_experiments.on_machine.execute_command is missing or empty"
+[[ -n ${EXEC_DIR} ]] || die "Config error: .running_experiments.on_machine.full_path_to_executable is missing or empty"
+[[ ${PARALLEL_N} =~ ^[0-9]+$ ]] || die "Config error: .running_experiments.number_of_experiments_to_run_in_parallel_on_machine must be an integer"
 
 # --- Phase 1: Machine instantiation (on FE) ---
 log_step "Phase 1/4: Machine instantiation (${IS_MANUAL:+manual})"
@@ -123,11 +134,11 @@ if [[ ! -f ${CURRENT_NODE_FILE} ]]; then
 	if [[ -f ${ALT_NODE_FILE} ]]; then
 		CURRENT_NODE_FILE=${ALT_NODE_FILE}
 	else
-		die "Node name file not found: ${CURRENT_NODE_FILE}"
+		die "Node name file not found: ${CURRENT_NODE_FILE}. Ensure Phase 1 saved the node hostname."
 	fi
 fi
 NODE_NAME=$(<"${CURRENT_NODE_FILE}")
-[[ -n ${NODE_NAME} ]] || die "Empty node name in ${CURRENT_NODE_FILE}"
+[[ -n ${NODE_NAME} ]] || die "Empty node name read from ${CURRENT_NODE_FILE}"
 log "Target node: ${NODE_NAME}"
 
 # --- Phase 2: Project preparation ---
@@ -155,7 +166,7 @@ if ! ssh -o BatchMode=yes -o StrictHostKeyChecking=no "root@${NODE_NAME}" 'echo 
 	if command -v kadeploy3 >/dev/null 2>&1; then
 		log_warn "SSH not ready on ${NODE_NAME}. Deploying image via kadeploy3..."
 		if ! kadeploy3 -a "${HOME}/envs/img-files/${IMAGE_YAML_NAME}" -m "${NODE_NAME}" | tee -a "${LOG_DIR}/kadeploy.log"; then
-			die "kadeploy3 failed for ${NODE_NAME}"
+			die "kadeploy3 failed for ${NODE_NAME}. Check ${LOG_DIR}/kadeploy.log"
 		fi
 		log_info "Waiting for SSH to come up on ${NODE_NAME}..."
 		set +e
@@ -163,11 +174,11 @@ if ! ssh -o BatchMode=yes -o StrictHostKeyChecking=no "root@${NODE_NAME}" 'echo 
 		wst=$?
 		set -e
 		if [[ ${wst} -ne 0 ]]; then
-			die "Timed out waiting for SSH on ${NODE_NAME}"
+			die "Timed out waiting for SSH on ${NODE_NAME} (waited 900s). Verify deployment succeeded."
 		fi
 		log_success "SSH is now available on ${NODE_NAME}."
 	else
-		log_warn "kadeploy3 not available; ensure the node is deployed manually: kadeploy3 -a ${HOME}/envs/img-files/${IMAGE_YAML_NAME} -m ${NODE_NAME}"
+		log_warn "kadeploy3 not available; deploy manually: kadeploy3 -a ${HOME}/envs/img-files/${IMAGE_YAML_NAME} -m ${NODE_NAME}"
 	fi
 fi
 PREP_FE_DIR="${BIN_DIR}/project-preparation/on-fe"

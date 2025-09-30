@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Prepare FE -> Node: create remote structure, upload config and scripts
-set -euo pipefail
+set -Eeuo pipefail
 IFS=$'\n\t'
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -8,6 +8,17 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RUNNER_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 # shellcheck source=/dev/null
 source "${RUNNER_ROOT}/bin/utils/common.sh"
+# shellcheck source=/dev/null
+source "${RUNNER_ROOT}/bin/utils/liblog.sh"
+
+__on_err() {
+	local exit_code=$?
+	local line_no=${BASH_LINENO[0]:-?}
+	local src_file=${BASH_SOURCE[1]:-$(basename "$0")}
+	local last_cmd=${BASH_COMMAND:-unknown}
+	log_error "FE preparation failed (exit=${exit_code}) at ${src_file}:${line_no} while running: ${last_cmd}"
+}
+trap __on_err ERR
 
 NODE_NAME=""
 CONFIG_PATH=""
@@ -41,6 +52,7 @@ done
 [[ -f ${CONFIG_PATH} ]] || die "Config file not found: ${CONFIG_PATH}"
 
 require_cmd jq
+require_cmd tar
 
 # Parse config values
 PAR_PATH=$(jq -r '.running_experiments.on_fe.to_do_parameters_list_path' "${CONFIG_PATH}")
@@ -56,7 +68,7 @@ REMOTE_LOGS_DIR="${REMOTE_BASE}/on-machine/logs"
 REMOTE_DELEGATOR_DIR="${REMOTE_BASE}/on-machine"
 
 # Create base dirs
-log "Creating remote directories on ${NODE_NAME}"
+log_info "Creating remote directories on ${NODE_NAME}"
 if ! remote_mkdir_via_ssh "${NODE_NAME}" "${REMOTE_ON_MACHINE_DIR}"; then
 	log_warn "SSH not ready on ${NODE_NAME}. Skipping remote mkdir. After deploy is ready, rerun controller or run this step manually."
 fi
@@ -65,7 +77,7 @@ if ! remote_mkdir_via_ssh "${NODE_NAME}" "${REMOTE_LOGS_DIR}"; then
 fi
 
 # Upload config and params
-log "Uploading config and params"
+log_info "Uploading config and params"
 if ssh -o BatchMode=yes -o StrictHostKeyChecking=no "root@${NODE_NAME}" 'echo ok' >/dev/null 2>&1; then
 	scp -o StrictHostKeyChecking=no "${CONFIG_PATH}" "root@${NODE_NAME}:${REMOTE_BASE}/config.json"
 	scp -o StrictHostKeyChecking=no "${PAR_FILE}" "root@${NODE_NAME}:${REMOTE_BASE}/params.txt"
@@ -74,12 +86,12 @@ else
 fi
 
 # Upload on-machine scripts
-log "Uploading on-machine scripts"
+log_info "Uploading on-machine scripts"
 if ssh -o BatchMode=yes -o StrictHostKeyChecking=no "root@${NODE_NAME}" 'echo ok' >/dev/null 2>&1; then
-	# copy the contents of each local on-machine folder into the single remote on-machine folder
-	scp -o StrictHostKeyChecking=no -r "${RUNNER_ROOT}/bin/project-preparation/on-machine/." "root@${NODE_NAME}:${REMOTE_ON_MACHINE_DIR}/"
-	scp -o StrictHostKeyChecking=no -r "${RUNNER_ROOT}/bin/experiments-delegator/on-machine/." "root@${NODE_NAME}:${REMOTE_ON_MACHINE_DIR}/"
-	scp -o StrictHostKeyChecking=no -r "${RUNNER_ROOT}/bin/experiments-collector/on-machine/." "root@${NODE_NAME}:${REMOTE_ON_MACHINE_DIR}/"
+	# Use tar-over-ssh to avoid scp quirks with trailing dots and to preserve perms
+	transfer_dir_via_tar "${RUNNER_ROOT}/bin/project-preparation/on-machine" "${NODE_NAME}" "${REMOTE_ON_MACHINE_DIR}"
+	transfer_dir_via_tar "${RUNNER_ROOT}/bin/experiments-delegator/on-machine" "${NODE_NAME}" "${REMOTE_ON_MACHINE_DIR}"
+	transfer_dir_via_tar "${RUNNER_ROOT}/bin/experiments-collector/on-machine" "${NODE_NAME}" "${REMOTE_ON_MACHINE_DIR}"
 else
 	log_warn "SSH not ready on ${NODE_NAME}. Skipping script upload."
 fi
@@ -91,7 +103,7 @@ else
 	log_warn "SSH not ready on ${NODE_NAME}. Skipping OS type save."
 fi
 
-log "Preparation on FE complete."
+log_success "Preparation on FE complete."
 
 # Reference the logs directory for clarity and to mark it used
-log "FE preparation logs directory (info): ${LOG_DIR}"
+log_info "FE preparation logs directory (info): ${LOG_DIR}"
