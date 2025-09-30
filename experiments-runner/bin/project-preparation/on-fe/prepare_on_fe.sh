@@ -76,9 +76,10 @@ fi
 # Upload on-machine scripts
 log "Uploading on-machine scripts"
 if ssh -o BatchMode=yes -o StrictHostKeyChecking=no "root@${NODE_NAME}" 'echo ok' >/dev/null 2>&1; then
-	safe_scp_to_node "${RUNNER_ROOT}/bin/project-preparation/on-machine" "${NODE_NAME}" "${REMOTE_ON_MACHINE_DIR}"
-	safe_scp_to_node "${RUNNER_ROOT}/bin/experiments-delegator/on-machine" "${NODE_NAME}" "${REMOTE_ON_MACHINE_DIR}"
-	safe_scp_to_node "${RUNNER_ROOT}/bin/experiments-collector/on-machine" "${NODE_NAME}" "${REMOTE_ON_MACHINE_DIR}"
+	# copy the contents of each local on-machine folder into the single remote on-machine folder
+	scp -o StrictHostKeyChecking=no -r "${RUNNER_ROOT}/bin/project-preparation/on-machine/." "root@${NODE_NAME}:${REMOTE_ON_MACHINE_DIR}/"
+	scp -o StrictHostKeyChecking=no -r "${RUNNER_ROOT}/bin/experiments-delegator/on-machine/." "root@${NODE_NAME}:${REMOTE_ON_MACHINE_DIR}/"
+	scp -o StrictHostKeyChecking=no -r "${RUNNER_ROOT}/bin/experiments-collector/on-machine/." "root@${NODE_NAME}:${REMOTE_ON_MACHINE_DIR}/"
 else
 	log_warn "SSH not ready on ${NODE_NAME}. Skipping script upload."
 fi
