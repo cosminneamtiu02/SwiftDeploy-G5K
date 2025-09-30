@@ -24,3 +24,5 @@ Thumbs.db
 
 # generated YAMLs for env-creator
 experiments-runner/generated-yamls/
+
+grid5k-csnn/
