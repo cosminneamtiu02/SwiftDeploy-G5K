@@ -201,15 +201,16 @@ export SELECTED_BATCH="${SELECTED_BATCH_TEXT}"
 revert_done_batch() {
 	# Protect against missing or empty selection
 	[[ -f ${DONE_FILE_FE} ]] || return 0
-	# Use process substitution to avoid writing any temp files to disk for the selection
-	local tmp
+	# Build selection list in a temporary file to avoid /dev/fd issues
+	local tmp tmp_sel
 	tmp="${DONE_FILE_FE}.tmp.$$"
+	tmp_sel=$(mktemp "${DONE_FILE_FE}.sel.XXXXXX")
+	# Write selected lines (exact) to tmp_sel
+	for __l in "${FE_SELECTED_LINES[@]}"; do printf '%s\n' "${__l}"; done >"${tmp_sel}"
 	awk 'BEGIN{ while((getline line<ARGV[2])>0){c[line]++} close(ARGV[2]) } { if(c[$0]>0){ c[$0]--; next } print }' \
-		"${DONE_FILE_FE}" /dev/fd/3 3<<'EOF_FE_SELECTED'
-$(printf '%s
-' "${FE_SELECTED_LINES[@]}")
-EOF_FE_SELECTED
-	mv "${tmp}" "${DONE_FILE_FE}" || true
+		"${DONE_FILE_FE}" "${tmp_sel}" >"${tmp}" || true
+	mv "${tmp}" "${DONE_FILE_FE}" 2>/dev/null || true
+	rm -f "${tmp_sel}" 2>/dev/null || true
 }
 
 # Arrange revert on any failure before successful completion
@@ -303,8 +304,14 @@ SELECTED_BATCH=$(printf '%s\n' "${SELECTED[@]}")
 revert_done_selection() {
 	[[ -n ${SELECTED_BATCH} && -f ${DONE_FILE_FE} ]] || return 0
 	local tmpf="${DONE_FILE_FE}.tmp.$$"
+	local sel_file
+	sel_file=$(mktemp "${DONE_FILE_FE}.sel.XXXXXX")
+	# Write selection lines to a temp file (honor exact line matches)
+	printf '%s\n' "${SELECTED_BATCH}" >"${sel_file}"
 	awk 'BEGIN{ while((getline line<ARGV[2])>0){c[line]++} close(ARGV[2]) } { if(c[$0]>0){ c[$0]--; next } print }' \
-		"${DONE_FILE_FE}" <(printf '%s\n' "${SELECTED_BATCH}") >"${tmpf}" && mv "${tmpf}" "${DONE_FILE_FE}" || true
+		"${DONE_FILE_FE}" "${sel_file}" >"${tmpf}" || true
+	mv "${tmpf}" "${DONE_FILE_FE}" 2>/dev/null || true
+	rm -f "${sel_file}" 2>/dev/null || true
 }
 
 # Trap to revert on any failure in later phases (deploy/prepare/delegate/collect)
