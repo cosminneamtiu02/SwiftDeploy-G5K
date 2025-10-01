@@ -466,30 +466,19 @@ fi
 log_step "Phase 3/4: Delegating experiments on node"
 if ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" 'echo ok' >/dev/null 2>&1; then
 	# Start streaming remote logs to FE console
-	if command -v stdbuf >/dev/null 2>&1; then
-		log_info "Starting remote log stream from ${NODE_NAME} (${REMOTE_LOGS_DIR})"
-		ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" \
-			"bash -lc 'shopt -s nullglob; mkdir -p ${REMOTE_LOGS_DIR}; touch ${REMOTE_LOGS_DIR}/delegator.log ${REMOTE_LOGS_DIR}/collector.log; stdbuf -oL -eL tail -v -n +1 -F ${REMOTE_LOGS_DIR}/delegator.log ${REMOTE_LOGS_DIR}/collector.log 2>/dev/null'" |
-			while IFS= read -r line; do
-				ts=$(date +%H:%M:%S)
-				echo "[${ts}] [INFO]  [${NODE_NAME}] ${line}"
-			done &
-		STREAM_PID=$!
-	else
-		log_warn "stdbuf not available on FE; log streaming may be buffered."
-		ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" \
-			"bash -lc 'shopt -s nullglob; mkdir -p ${REMOTE_LOGS_DIR}; touch ${REMOTE_LOGS_DIR}/delegator.log ${REMOTE_LOGS_DIR}/collector.log; tail -v -n +1 -F ${REMOTE_LOGS_DIR}/delegator.log ${REMOTE_LOGS_DIR}/collector.log 2>/dev/null'" |
-			while IFS= read -r line; do
-				ts=$(date +%H:%M:%S)
-				echo "[${ts}] [INFO]  [${NODE_NAME}] ${line}"
-			done &
-		STREAM_PID=$!
-	fi
+	log_info "Starting remote log stream from ${NODE_NAME} (${REMOTE_LOGS_DIR})"
+	ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" \
+		"bash -lc 'shopt -s nullglob; mkdir -p ${REMOTE_LOGS_DIR}; touch ${REMOTE_LOGS_DIR}/delegator.log ${REMOTE_LOGS_DIR}/collector.log; if command -v stdbuf >/dev/null 2>&1; then stdbuf -oL -eL tail -v -n +1 -F ${REMOTE_LOGS_DIR}/delegator.log ${REMOTE_LOGS_DIR}/collector.log; else tail -v -n +1 -F ${REMOTE_LOGS_DIR}/delegator.log ${REMOTE_LOGS_DIR}/collector.log; fi 2>/dev/null'" |
+		while IFS= read -r line; do
+			ts=$(date +%H:%M:%S)
+			printf '[%s] [INFO]  [%s] %s\n' "${ts}" "${NODE_NAME}" "${line}" 2>/dev/null || true
+		done &
+	STREAM_PID=$!
 
 	# Run delegator synchronously; its stdout will also appear locally
 	set +e
 	LOG_FILE="${LOG_DIR}/delegator.log" ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" \
-		"bash -lc 'if command -v stdbuf >/dev/null 2>&1; then STDBUF_PREFIX="stdbuf -oL -eL "; fi; export SELECTED_PARAMS_B64=${SELECTED_LINES_B64:-}; CONFIG_JSON=~/experiments_node/config.json ${STDBUF_PREFIX:-}~/experiments_node/on-machine/run_delegator.sh'"
+		"bash -lc 'if command -v stdbuf >/dev/null 2>&1; then export SELECTED_PARAMS_B64=${SELECTED_LINES_B64:-}; CONFIG_JSON=~/experiments_node/config.json stdbuf -oL -eL ~/experiments_node/on-machine/run_delegator.sh; else export SELECTED_PARAMS_B64=${SELECTED_LINES_B64:-}; CONFIG_JSON=~/experiments_node/config.json ~/experiments_node/on-machine/run_delegator.sh; fi'"
 	deleg_rc=$?
 	set -e
 

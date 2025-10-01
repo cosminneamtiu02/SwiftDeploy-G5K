@@ -8,7 +8,10 @@
 set -euo pipefail
 IFS=$'\n\t'
 
-__log_ts() { date +"%H:%M:%S"; }
+# Ignore SIGPIPE so logging doesn't crash or spam on closed pipes
+trap '' PIPE
+
+__log_ts() { date +"%H:%M:%S" 2>/dev/null || true; }
 
 __log_supports_color=false
 if [[ -t 1 && -z ${NO_COLOR:-} ]]; then
@@ -50,12 +53,12 @@ __write_log() {
 	local ts
 	ts=$(__log_ts)
 	local line="[${ts}] ${lvl_lbl}${msg}${__CLR_RESET}"
-	# stdout
-	echo -e "${line}"
+	# stdout (ignore write errors if consumer closed the pipe)
+	echo -e "${line}" 2>/dev/null || true
 	# optional file
 	if [[ -n ${LOG_FILE:-} ]]; then
 		# strip colors for file
-		echo "[${ts}] ${msg}" >>"${LOG_FILE}"
+		echo "[${ts}] ${msg}" >>"${LOG_FILE}" 2>/dev/null || true
 	fi
 }
 
