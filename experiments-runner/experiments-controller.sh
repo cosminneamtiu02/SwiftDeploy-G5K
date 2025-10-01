@@ -18,6 +18,7 @@ REMOTE_LOGS_DIR="${REMOTE_BASE_DIR}/on-machine/logs"
 
 # FE-side tracking (done.txt) variables
 SELECTED_BATCH=""
+BATCH_OK=0
 
 # --- CLI args ---
 CONFIG_NAME=""
@@ -196,11 +197,6 @@ done
 SELECTED_BATCH_TEXT=$(printf '%s\n' "${FE_SELECTED_LINES[@]}")
 export SELECTED_BATCH="${SELECTED_BATCH_TEXT}"
 
-# Also prepare base64-encoded selection for remote scripts and mark selection made
-SELECTED_LINES_B64=$(printf '%s\n' "${FE_SELECTED_LINES[@]}" | base64 -w0)
-FE_SELECTION_MADE=1
-FE_BATCH_OK=0
-
 # Revert helper: remove exactly one occurrence of each selected line from done.txt
 revert_done_batch() {
 	# Protect against missing or empty selection
@@ -229,8 +225,160 @@ __cleanup_fe_batch() {
 # Chain cleanup: ensure our revert runs at EXIT, but only after controller-local cleanup
 trap '__cleanup; __cleanup_fe_batch' EXIT
 
-# Wrapper to maintain compatibility with previous revert callsite
-fe_revert_done() { revert_done_batch; }
+# --- FE-side parameter selection using done.txt (before any deployment) ---
+# Resolve params path on FE
+resolve_fe_params_path() {
+	local p="$1"
+	if [[ -z ${p} ]]; then
+		echo ""
+		return
+	fi
+	if [[ ${p} == /* ]]; then
+		echo "${p}"
+	else
+		echo "${RUNNER_ROOT}/params/${p}"
+	fi
+}
+
+PAR_FILE_FE=$(resolve_fe_params_path "${PAR_PATH}")
+[[ -f ${PAR_FILE_FE} ]] || die "Parameters list not found on FE: ${PAR_FILE_FE}"
+
+# done.txt sits in the same folder as the params list
+PAR_DIR_FE=$(dirname "${PAR_FILE_FE}")
+DONE_FILE_FE="${PAR_DIR_FE}/done.txt"
+
+# Ensure done.txt exists (Case 1)
+if [[ ! -f ${DONE_FILE_FE} ]]; then
+	log_info "Creating tracker file: ${DONE_FILE_FE}"
+	: >"${DONE_FILE_FE}"
+fi
+
+# Compute remaining = runs.txt minus done.txt (multiset-aware)
+mapfile -t _todo_lines < <(grep -v '^[[:space:]]*$' "${PAR_FILE_FE}" || true)
+declare -A _done_counts=()
+while IFS= read -r _dl; do
+	[[ -n ${_dl} ]] || continue
+	((_done_counts["${_dl}"]++)) || true
+done < <(grep -v '^[[:space:]]*$' "${DONE_FILE_FE}" || true)
+
+_remaining=()
+for _ln in "${_todo_lines[@]}"; do
+	if [[ ${_done_counts["${_ln}"]+set} == set && ${_done_counts["${_ln}"]} -gt 0 ]]; then
+		((_done_counts["${_ln}"]--)) || true
+	else
+		_remaining+=("${_ln}")
+	fi
+done
+
+if [[ ${#_remaining[@]} -eq 0 ]]; then
+	log_info "Nothing left to run. Cleaning up tracker and exiting."
+	rm -f "${DONE_FILE_FE}" || true
+	exit 0
+fi
+
+# Take first N lines
+_select_n=${PARALLEL_N}
+SELECTED=()
+for ((i = 0; i < ${#_remaining[@]} && i < _select_n; i++)); do
+	SELECTED+=("${_remaining[${i}]}")
+done
+
+# Display selection before any deployment
+log_step "Selected parameters for this run (count=${#SELECTED[@]}):"
+for s in "${SELECTED[@]}"; do
+	log_info "${s}"
+done
+
+# Append to done.txt immediately (Case 1 and Case 2)
+{
+	for s in "${SELECTED[@]}"; do
+		printf '%s\n' "${s}"
+	done
+} >>"${DONE_FILE_FE}"
+
+# Keep selection in memory for potential revert (no temp files)
+SELECTED_BATCH=$(printf '%s\n' "${SELECTED[@]}")
+
+# Revert function: remove exactly one occurrence of each selected line from done.txt
+revert_done_selection() {
+	[[ -n ${SELECTED_BATCH} && -f ${DONE_FILE_FE} ]] || return 0
+	local tmpf="${DONE_FILE_FE}.tmp.$$"
+	awk 'BEGIN{ while((getline line<ARGV[2])>0){c[line]++} close(ARGV[2]) } { if(c[$0]>0){ c[$0]--; next } print }' \
+		"${DONE_FILE_FE}" <(printf '%s\n' "${SELECTED_BATCH}") >"${tmpf}" && mv "${tmpf}" "${DONE_FILE_FE}" || true
+}
+
+# Trap to revert on any failure in later phases (deploy/prepare/delegate/collect)
+__revert_on_fail() {
+	local code=$?
+	if [[ ${BATCH_OK} -ne 1 ]]; then
+		log_warn "Failure detected (exit=${code}). Reverting FE done.txt selection."
+		revert_done_selection
+	fi
+}
+trap __revert_on_fail ERR
+
+# --- FE-side parameters selection and done.txt management (before any deployment) ---
+FE_PARAMS_REL="${PAR_PATH}"
+FE_PARAMS_PATH="${RUNNER_ROOT}/params/${FE_PARAMS_REL}"
+FE_PARAMS_DIR="$(dirname "${FE_PARAMS_PATH}")"
+FE_DONE_FILE="${FE_PARAMS_DIR}/done.txt"
+
+[[ -f ${FE_PARAMS_PATH} ]] || die "Params file not found on FE: ${FE_PARAMS_PATH}"
+
+# Create done.txt if missing (Case 1)
+if [[ ! -f ${FE_DONE_FILE} ]]; then
+	: >"${FE_DONE_FILE}"
+fi
+
+declare -A __done_map=()
+while IFS= read -r __dline || [[ -n ${__dline} ]]; do
+	[[ -n ${__dline//[[:space:]]/} ]] || continue
+	__done_map["${__dline}"]=1
+done <"${FE_DONE_FILE}"
+
+declare -a SELECTED_FE_LINES=()
+while IFS= read -r __pline || [[ -n ${__pline} ]]; do
+	[[ -n ${__pline//[[:space:]]/} ]] || continue
+	if [[ -z ${__done_map["${__pline}"]+x} ]]; then
+		SELECTED_FE_LINES+=("${__pline}")
+		__done_map["${__pline}"]=1
+		if ((${#SELECTED_FE_LINES[@]} >= PARALLEL_N)); then
+			break
+		fi
+	fi
+done <"${FE_PARAMS_PATH}"
+
+if ((${#SELECTED_FE_LINES[@]} == 0)); then
+	log_step "Nothing left to run. Deleting ${FE_DONE_FILE} and exiting."
+	rm -f "${FE_DONE_FILE}" 2>/dev/null || true
+	exit 0
+fi
+
+log_step "Running execution with the parameters (selected on FE before deployment):"
+for __p in "${SELECTED_FE_LINES[@]}"; do
+	echo "  ${__p}"
+done
+
+# Immediately append selected lines to done.txt
+{
+	for __p in "${SELECTED_FE_LINES[@]}"; do printf '%s\n' "${__p}"; done
+} >>"${FE_DONE_FILE}"
+
+# Keep selection in-memory (no files) and prepare transfer to node via env var
+SELECTED_LINES_B64=$(printf '%s\n' "${SELECTED_FE_LINES[@]}" | base64 -w0)
+FE_SELECTION_MADE=1
+FE_BATCH_OK=0
+
+fe_revert_done() {
+	# Remove exactly one occurrence of each selected line from done.txt without creating a file with the lines
+	local tmp_out
+	tmp_out="${FE_DONE_FILE}.tmp.$$"
+	awk -v list="${SELECTED_LINES_B64}" '
+		BEGIN { n = split(list_dec(list), arr, "\n"); for (i=1;i<=n;i++) if (length(arr[i])) c[arr[i]]++ }
+		function list_dec(s,   cmd, out) { cmd = "echo \"" s "\" | base64 -d"; cmd | getline out; close(cmd); return out }
+		{ if (c[$0] > 0) { c[$0]--; next } print }
+	' "${FE_DONE_FILE}" >"${tmp_out}" && mv "${tmp_out}" "${FE_DONE_FILE}" || true
+}
 
 # --- Phase 1: Machine instantiation (on FE) ---
 log_step "Phase 1/4: Machine instantiation (${IS_MANUAL:+manual})"
@@ -318,17 +466,17 @@ fi
 log_step "Phase 3/4: Delegating experiments on node"
 if ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" 'echo ok' >/dev/null 2>&1; then
 	# Start streaming remote logs to FE console
-	log_info "Starting remote log stream from ${NODE_NAME} (${REMOTE_LOGS_DIR})"
 	if command -v stdbuf >/dev/null 2>&1; then
+		log_info "Starting remote log stream from ${NODE_NAME} (${REMOTE_LOGS_DIR})"
 		ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" \
-			"bash -lc 'shopt -s nullglob; mkdir -p ${REMOTE_LOGS_DIR}; touch ${REMOTE_LOGS_DIR}/delegator.log ${REMOTE_LOGS_DIR}/collector.log; tail -v -n +1 -F ${REMOTE_LOGS_DIR}/delegator.log ${REMOTE_LOGS_DIR}/collector.log 2>/dev/null'" |
-			stdbuf -oL -eL cat |
+			"bash -lc 'shopt -s nullglob; mkdir -p ${REMOTE_LOGS_DIR}; touch ${REMOTE_LOGS_DIR}/delegator.log ${REMOTE_LOGS_DIR}/collector.log; stdbuf -oL -eL tail -v -n +1 -F ${REMOTE_LOGS_DIR}/delegator.log ${REMOTE_LOGS_DIR}/collector.log 2>/dev/null'" |
 			while IFS= read -r line; do
 				ts=$(date +%H:%M:%S)
 				echo "[${ts}] [INFO]  [${NODE_NAME}] ${line}"
 			done &
 		STREAM_PID=$!
 	else
+		log_warn "stdbuf not available on FE; log streaming may be buffered."
 		ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" \
 			"bash -lc 'shopt -s nullglob; mkdir -p ${REMOTE_LOGS_DIR}; touch ${REMOTE_LOGS_DIR}/delegator.log ${REMOTE_LOGS_DIR}/collector.log; tail -v -n +1 -F ${REMOTE_LOGS_DIR}/delegator.log ${REMOTE_LOGS_DIR}/collector.log 2>/dev/null'" |
 			while IFS= read -r line; do
@@ -338,10 +486,10 @@ if ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" 'echo ok' >/dev/null 2>&1
 		STREAM_PID=$!
 	fi
 
-	# Run delegator synchronously; redirect its stdout/stderr to remote delegator.log
+	# Run delegator synchronously; its stdout will also appear locally
 	set +e
 	LOG_FILE="${LOG_DIR}/delegator.log" ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" \
-		"bash -lc 'mkdir -p ${REMOTE_LOGS_DIR}; if command -v stdbuf >/dev/null 2>&1; then STDBUF_PREFIX="stdbuf -oL -eL "; fi; export SELECTED_PARAMS_B64=${SELECTED_LINES_B64:-}; CONFIG_JSON=~/experiments_node/config.json ${STDBUF_PREFIX:-}~/experiments_node/on-machine/run_delegator.sh >> ${REMOTE_LOGS_DIR}/delegator.log 2>&1'"
+		"bash -lc 'if command -v stdbuf >/dev/null 2>&1; then STDBUF_PREFIX="stdbuf -oL -eL "; fi; export SELECTED_PARAMS_B64=${SELECTED_LINES_B64:-}; CONFIG_JSON=~/experiments_node/config.json ${STDBUF_PREFIX:-}~/experiments_node/on-machine/run_delegator.sh'"
 	deleg_rc=$?
 	set -e
 
