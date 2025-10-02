@@ -317,8 +317,11 @@ if ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" 'echo ok' >/dev/null 2>&1
 	log_info "Starting delegation and live log stream from ${NODE_NAME} (${REMOTE_LOGS_DIR})"
 	# Single SSH session with heredoc: remotely tail logs in background, run delegator, then stop tail; stream output here.
 	set +e
-	{
-		ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" "REMOTE_LOGS_DIR='${REMOTE_LOGS_DIR}' SELECTED_PARAMS_B64='${SELECTED_LINES_B64:-}' bash -s" <<'REMOTE_SH'
+	ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" "REMOTE_LOGS_DIR='${REMOTE_LOGS_DIR}' SELECTED_PARAMS_B64='${SELECTED_LINES_B64:-}' bash -s" <<'REMOTE_SH' |
+	while IFS= read -r line; do
+		ts=$(date +%H:%M:%S)
+		printf '[%s] [INFO]  [%s] %s\n' "${ts}" "${NODE_NAME}" "${line}" 2>/dev/null || true
+	done
 set -Eeuo pipefail
 mkdir -p "$REMOTE_LOGS_DIR"
 touch "$REMOTE_LOGS_DIR/delegator.log" "$REMOTE_LOGS_DIR/collector.log"
@@ -330,11 +333,7 @@ if command -v stdbuf >/dev/null 2>&1; then stdbuf -oL -eL ~/experiments_node/on-
 if [[ -f "$REMOTE_LOGS_DIR/.tail_pid" ]]; then kill "$(cat "$REMOTE_LOGS_DIR/.tail_pid")" >/dev/null 2>&1 || true; rm -f "$REMOTE_LOGS_DIR/.tail_pid"; fi
 exit $rc
 REMOTE_SH
-	} | while IFS= read -r line; do
-		ts=$(date +%H:%M:%S)
-		printf '[%s] [INFO]  [%s] %s\n' "${ts}" "${NODE_NAME}" "${line}" 2>/dev/null || true
-	done
-	deleg_rc=${PIPESTATUS[0]}
+		deleg_rc=${PIPESTATUS[0]}
 	set -e
 
 	if [[ ${deleg_rc:-0} -ne 0 ]]; then
