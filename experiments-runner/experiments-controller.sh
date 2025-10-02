@@ -185,6 +185,10 @@ for sl in "${FE_SELECTED_LINES[@]}"; do
 	echo "[${ts}] [INFO]  [FE] ${sl}"
 done
 
+# Snapshot done.txt BEFORE appending, so we can restore exact pre-run state on failure
+BATCH_DONE_BACKUP="${DONE_FILE_FE}.bak.$(date +%s).$$"
+cp -f "${DONE_FILE_FE}" "${BATCH_DONE_BACKUP}" 2>/dev/null || true
+
 # Immediately append selected lines to done.txt
 {
 	for sl in "${FE_SELECTED_LINES[@]}"; do printf '%s\n' "${sl}"; done
@@ -195,11 +199,6 @@ SELECTED_BATCH_TEXT=$(printf '%s\n' "${FE_SELECTED_LINES[@]}")
 export SELECTED_BATCH="${SELECTED_BATCH_TEXT}"
 SELECTED_LINES_B64=$(printf '%s\n' "${FE_SELECTED_LINES[@]}" | base64 -w0)
 FE_BATCH_OK=0
-
-# Revert helper: remove exactly one occurrence of each selected line from done.txt
-# Snapshot done.txt before appending so we can restore exactly on failure
-BATCH_DONE_BACKUP="${DONE_FILE_FE}.bak.$(date +%s).$$"
-cp -f "${DONE_FILE_FE}" "${BATCH_DONE_BACKUP}" 2>/dev/null || true
 
 revert_done_batch() {
 	# Prefer exact restore from snapshot if available
