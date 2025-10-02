@@ -139,6 +139,17 @@ on_exit() {
 trap on_fail_or_interrupt ERR INT TERM HUP
 trap on_exit EXIT
 
+# Detailed error context for debugging: log the exact line and command on failure
+__on_err() {
+	local exit_code=$?
+	local line_no=${BASH_LINENO[0]:-?}
+	local cmd=${BASH_COMMAND:-unknown}
+	err "Failure (exit=${exit_code}) at line ${line_no} while running: ${cmd}"
+	# Fall back to the standard failure handler
+	on_fail_or_interrupt
+}
+trap __on_err ERR
+
 # Prefer GNU parallel if exists
 if command -v parallel >/dev/null 2>&1; then
 	# Stream outputs to both console and delegator.log so FE tail can display them nicely

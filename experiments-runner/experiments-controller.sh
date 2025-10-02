@@ -13,8 +13,6 @@ CONFIGS_DIR_PRIMARY="${RUNNER_ROOT}/experiments-configurations"
 CONFIGS_DIR_IMPL="${CONFIGS_DIR_PRIMARY}/implementations"
 CURRENT_NODE_FILE="${RUNNER_ROOT}/current_node.txt"
 ALT_NODE_FILE="${REPO_ROOT}/current_node.txt"
-REMOTE_BASE_DIR="/root/experiments_node"
-REMOTE_LOGS_DIR="${REMOTE_BASE_DIR}/on-machine/logs"
 
 # FE-side tracking (done.txt) variables
 SELECTED_BATCH=""
@@ -314,39 +312,25 @@ fi
 # --- Phase 3: Delegate experiments ---
 log_step "Phase 3/4: Delegating experiments on node"
 if ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" 'echo ok' >/dev/null 2>&1; then
-	log_info "Starting delegation and live log stream from ${NODE_NAME} (${REMOTE_LOGS_DIR})"
-	# Single SSH session with heredoc: remotely tail logs in background, run delegator, then stop tail; stream output here.
-	# Suppress ERR trap and pipefail for this pipeline so we can handle rc cleanly without noisy controller errors.
+	log_info "Starting delegation and live log stream from ${NODE_NAME}"
+	# Stream run_delegator.sh output directly; run_delegator already tees to its log.
 	set +e
 	set +o pipefail
 	trap - ERR
-	ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" "REMOTE_LOGS_DIR='${REMOTE_LOGS_DIR}' SELECTED_PARAMS_B64='${SELECTED_LINES_B64:-}' bash -s" <<'REMOTE_SH' |
-	while IFS= read -r line; do
-		ts=$(date +%H:%M:%S)
-		printf '[%s] [INFO]  [%s] %s\n' "${ts}" "${NODE_NAME}" "${line}" 2>/dev/null || true
-	done
-set -Eeuo pipefail
-mkdir -p "$REMOTE_LOGS_DIR"
-touch "$REMOTE_LOGS_DIR/delegator.log" "$REMOTE_LOGS_DIR/collector.log"
-if command -v stdbuf >/dev/null 2>&1; then TAIL="stdbuf -oL -eL tail"; else TAIL="tail"; fi
-{ $TAIL -v -n +1 -F "$REMOTE_LOGS_DIR/delegator.log" "$REMOTE_LOGS_DIR/collector.log" & echo $! > "$REMOTE_LOGS_DIR/.tail_pid"; } 2>/dev/null
-CONFIG_JSON=~/experiments_node/config.json
-rc=0
-if command -v stdbuf >/dev/null 2>&1; then stdbuf -oL -eL ~/experiments_node/on-machine/run_delegator.sh || rc=$?; else ~/experiments_node/on-machine/run_delegator.sh || rc=$?; fi
-if [[ -f "$REMOTE_LOGS_DIR/.tail_pid" ]]; then kill "$(cat "$REMOTE_LOGS_DIR/.tail_pid")" >/dev/null 2>&1 || true; rm -f "$REMOTE_LOGS_DIR/.tail_pid"; fi
-exit $rc
-REMOTE_SH
-		__ssh_rc=${PIPESTATUS[0]}
-	__while_rc=${PIPESTATUS[1]:-0}
-	# Restore shell options and traps
+	ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" bash -lc \
+		"'export SELECTED_PARAMS_B64=${SELECTED_LINES_B64:-}; CONFIG_JSON=~/experiments_node/config.json; if command -v stdbuf >/dev/null 2>&1; then stdbuf -oL -eL ~/experiments_node/on-machine/run_delegator.sh; else ~/experiments_node/on-machine/run_delegator.sh; fi'" |
+		while IFS= read -r line; do
+			ts=$(date +%H:%M:%S)
+			printf '[%s] [INFO]  [%s] %s\n' "${ts}" "${NODE_NAME}" "${line}" 2>/dev/null || true
+		done
+	deleg_rc=${PIPESTATUS[0]}
 	trap __on_err ERR
 	set -o pipefail
 	set -e
 
-	# If ssh/remote returned non-zero, treat as delegator failure
-	if [[ ${__ssh_rc:-0} -ne 0 ]]; then
-		log_warn "Delegator failed (rc=${__ssh_rc}). Exiting and reverting selection."
-		exit "${__ssh_rc}"
+	if [[ ${deleg_rc:-0} -ne 0 ]]; then
+		log_warn "Delegator failed (rc=${deleg_rc}). Exiting and reverting selection."
+		exit "${deleg_rc}"
 	fi
 	FE_BATCH_OK=1
 else
