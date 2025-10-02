@@ -318,7 +318,7 @@ if ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" 'echo ok' >/dev/null 2>&1
 	set +o pipefail
 	trap - ERR
 	ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" bash -lc \
-		"'export SELECTED_PARAMS_B64=${SELECTED_LINES_B64:-}; CONFIG_JSON=~/experiments_node/config.json; if command -v stdbuf >/dev/null 2>&1; then stdbuf -oL -eL ~/experiments_node/on-machine/run_delegator.sh; else ~/experiments_node/on-machine/run_delegator.sh; fi'" |
+		"'export SELECTED_PARAMS_B64=${SELECTED_LINES_B64:-}; CONFIG_JSON=~/experiments_node/config.json; if command -v stdbuf >/dev/null 2>&1; then stdbuf -oL -eL ~/experiments_node/on-machine/run_delegator.sh; else ~/experiments_node/on-machine/run_delegator.sh; fi'" 2>&1 |
 		while IFS= read -r line; do
 			ts=$(date +%H:%M:%S)
 			printf '[%s] [INFO]  [%s] %s\n' "${ts}" "${NODE_NAME}" "${line}" 2>/dev/null || true

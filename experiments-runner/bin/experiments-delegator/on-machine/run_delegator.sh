@@ -160,11 +160,10 @@ if command -v parallel >/dev/null 2>&1; then
 else
 	pids=()
 	for params in "${batch[@]}"; do
-		# Run in background and stream both stdout/stderr to delegator.log AND to a per-run .out file
-		# Using tee so FE-side tail of delegator.log captures live lines even without GNU parallel
+		# Run in background and stream both stdout/stderr; keep live stdout for FE, and tee to logs
 		# shellcheck disable=SC2312
 		outfile="${LOGS_DIR}/$(date +%s)_$(echo "${params}" | tr ' ' '_').out"
-		sh -c "${BUF_PREFIX} ${EXEC_CMD} ${params}" 2>&1 | tee -a "${LOGS_DIR}/delegator.log" >"${outfile}" &
+		sh -c "${BUF_PREFIX} ${EXEC_CMD} ${params}" 2>&1 | tee -a "${LOGS_DIR}/delegator.log" | tee "${outfile}" &
 		pids+=("$!")
 	done
 	# wait for all
