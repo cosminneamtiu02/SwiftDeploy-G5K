@@ -197,14 +197,22 @@ SELECTED_LINES_B64=$(printf '%s\n' "${FE_SELECTED_LINES[@]}" | base64 -w0)
 FE_BATCH_OK=0
 
 # Revert helper: remove exactly one occurrence of each selected line from done.txt
+# Snapshot done.txt before appending so we can restore exactly on failure
+BATCH_DONE_BACKUP="${DONE_FILE_FE}.bak.$(date +%s).$$"
+cp -f "${DONE_FILE_FE}" "${BATCH_DONE_BACKUP}" 2>/dev/null || true
+
 revert_done_batch() {
-	# Protect against missing or empty selection
+	# Prefer exact restore from snapshot if available
+	if [[ -f ${BATCH_DONE_BACKUP} ]]; then
+		mv -f "${BATCH_DONE_BACKUP}" "${DONE_FILE_FE}" 2>/dev/null || true
+		log_info "Restored ${DONE_FILE_FE} from snapshot."
+		return 0
+	fi
+	# Fallback: remove one occurrence of each selected line
 	[[ -f ${DONE_FILE_FE} ]] || return 0
-	# Build selection list in a temporary file to avoid /dev/fd issues
 	local tmp tmp_sel
 	tmp="${DONE_FILE_FE}.tmp.$$"
 	tmp_sel=$(mktemp "${DONE_FILE_FE}.sel.XXXXXX")
-	# Write selected lines (exact) to tmp_sel
 	for __l in "${FE_SELECTED_LINES[@]}"; do printf '%s\n' "${__l}"; done >"${tmp_sel}"
 	awk 'BEGIN{ while((getline line<ARGV[2])>0){c[line]++} close(ARGV[2]) } { if(c[$0]>0){ c[$0]--; next } print }' \
 		"${DONE_FILE_FE}" "${tmp_sel}" >"${tmp}" || true
@@ -219,6 +227,9 @@ __cleanup_fe_batch() {
 	if [[ ${FE_BATCH_OK} -ne 1 ]]; then
 		log_warn "Reverting FE done.txt entries for this batch due to failure/interruption."
 		revert_done_batch
+	else
+		# Success: remove backup snapshot if present
+		rm -f "${BATCH_DONE_BACKUP}" 2>/dev/null || true
 	fi
 }
 
