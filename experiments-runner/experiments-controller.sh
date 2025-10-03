@@ -322,6 +322,18 @@ fi
 # --- Phase 3: Delegate experiments ---
 log_step "Phase 3/4: Delegating experiments on node"
 if ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" 'echo ok' >/dev/null 2>&1; then
+	# Create a collection marker in the node results dir to later copy only files from this run
+	MARKER_REMOTE_PATH=""
+	if [[ -n ${COLLECT_MACHINE_DIR:-} ]]; then
+		REMOTE_DIR_NO_TRAIL="${COLLECT_MACHINE_DIR%/}"
+		MARKER_REMOTE_PATH="${REMOTE_DIR_NO_TRAIL}/.collect_marker_$(date +%s)"
+		if ! ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" \
+			"bash -lc 'mkdir -p \"${REMOTE_DIR_NO_TRAIL}\" && : > \"${MARKER_REMOTE_PATH}\"'"; then
+			log_warn "Could not create marker file on node; will fallback to copying all .txt files."
+			MARKER_REMOTE_PATH=""
+		fi
+	fi
+
 	log_info "Starting delegation and live log stream from ${NODE_NAME}"
 	# Stream run_delegator.sh output directly; run_delegator already tees to its log.
 	set +e
@@ -363,14 +375,26 @@ if [[ -n ${COLLECT_FE_DIR} && -n ${COLLECT_MACHINE_DIR} ]]; then
 
 	# List .txt files on node within the specified directory (non-recursive)
 	REMOTE_DIR_NO_TRAIL="${COLLECT_MACHINE_DIR%/}"
-	# Use find for robust matching even if no files exist
+	# Only pull files created during this run: use marker if present, else fallback to all .txt
 	mapfile -t REMOTE_TXT_FILES < <(ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" \
-		"bash -lc 'find \"${REMOTE_DIR_NO_TRAIL}\" -maxdepth 1 -type f -name \"*.txt\" -print 2>/dev/null'" || true)
+		"bash -lc 'if [[ -n \"${MARKER_REMOTE_PATH:-}\" && -f \"${MARKER_REMOTE_PATH}\" ]]; then \
+						find \"${REMOTE_DIR_NO_TRAIL}\" -maxdepth 1 -type f -name \"*.txt\" -newer \"${MARKER_REMOTE_PATH}\" -print 2>/dev/null; \
+					else \
+						find \"${REMOTE_DIR_NO_TRAIL}\" -maxdepth 1 -type f -name \"*.txt\" -print 2>/dev/null; \
+					fi'" || true)
 
 	if ((${#REMOTE_TXT_FILES[@]} == 0)); then
-		log_warn "No .txt result files found on node at ${REMOTE_DIR_NO_TRAIL}."
+		if [[ -n ${MARKER_REMOTE_PATH:-} ]]; then
+			log_warn "No new .txt result files found on node at ${REMOTE_DIR_NO_TRAIL} since marker."
+		else
+			log_warn "No .txt result files found on node at ${REMOTE_DIR_NO_TRAIL}."
+		fi
 	else
-		log_info "Found ${#REMOTE_TXT_FILES[@]} .txt files on node; starting transfer to ${FE_TARGET_DIR}"
+		if [[ -n ${MARKER_REMOTE_PATH:-} ]]; then
+			log_info "Found ${#REMOTE_TXT_FILES[@]} new .txt files on node; starting transfer to ${FE_TARGET_DIR}"
+		else
+			log_info "Found ${#REMOTE_TXT_FILES[@]} .txt files on node; starting transfer to ${FE_TARGET_DIR}"
+		fi
 		copied=0
 		for rf in "${REMOTE_TXT_FILES[@]}"; do
 			# Copy one file at a time, preserving filename into FE_TARGET_DIR

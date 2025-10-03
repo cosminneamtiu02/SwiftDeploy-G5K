@@ -84,10 +84,10 @@ Step:
   oarsub -I -t deploy -q default
 
 - Make the controller script executable:
-  chmod +x grid5k-csnn/env-creator/frontend_controller.sh
+  chmod +x env-creator/frontend-controller.sh
 
 - Run the controller with a config:
-  ./grid5k-csnn/env-creator/frontend_controller.sh csnn_ck+_3d_CN.conf
+  ./env-creator/frontend-controller.sh csnn-ckplus-3d-CN.conf
 
 - Redeploy the saved environment later:
   kadeploy3 -a <GENERAL_NAME>.yaml
