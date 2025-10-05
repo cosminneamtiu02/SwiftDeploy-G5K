@@ -365,13 +365,15 @@ log_step "Phase 4/4: Transferring .txt result files from node to FE"
 # We copy each individual .txt file from the configured node results directory
 # to the configured FE collected directory. No concatenation.
 if [[ -n ${COLLECT_FE_DIR} && -n ${COLLECT_MACHINE_DIR} ]]; then
-	# Resolve FE target dir (under experiments-runner/collected unless absolute)
+	# New rule: if the JSON value is absolute (starts with /), use it verbatim.
+	# Otherwise interpret it as a folder name under ${HOME}/collected (hardcoded base).
 	if [[ ${COLLECT_FE_DIR} == /* ]]; then
 		FE_TARGET_DIR="${COLLECT_FE_DIR}"
 	else
-		FE_TARGET_DIR="${RUNNER_ROOT}/collected/${COLLECT_FE_DIR}"
+		FE_TARGET_DIR="${HOME}/collected/${COLLECT_FE_DIR}"
 	fi
-	mkdir -p "${FE_TARGET_DIR}"
+	mkdir -p "${FE_TARGET_DIR}" || die "Unable to create FE collection directory: ${FE_TARGET_DIR}"
+	log_debug "FE collection base hardcoded to ${HOME}/collected; using folder='${COLLECT_FE_DIR}' -> '${FE_TARGET_DIR}'"
 
 	# List .txt files on node within the specified directory (non-recursive)
 	REMOTE_DIR_NO_TRAIL="${COLLECT_MACHINE_DIR%/}"
