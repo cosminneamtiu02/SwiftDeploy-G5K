@@ -459,7 +459,8 @@ else
 		remote_list_cmd="cd '${look_into}' 2>/dev/null || exit 0; shopt -s nullglob;"
 		for ptn in "${patterns[@]}"; do
 			ptn_esc=${ptn//"'"/"'\\''"}
-			remote_list_cmd+=" for f in '${ptn_esc}'; do [[ -f \"${f}\" ]] && printf '%s\\n' \"${f}\"; done;"
+			# Append remote loop over pattern matches: rf is remote variable; escape $ for local shell
+			remote_list_cmd+=" for rf in '${ptn_esc}'; do [[ -f \"\${rf}\" ]] && printf '%s\\n' \"\${rf}\"; done;"
 		done
 		mapfile -t REMOTE_FILES < <(ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" "bash -lc \"${remote_list_cmd}\"" || true)
 		if ((${#REMOTE_FILES[@]} == 0)); then
