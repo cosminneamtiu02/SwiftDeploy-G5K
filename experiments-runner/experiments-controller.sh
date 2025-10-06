@@ -117,14 +117,78 @@ EXEC_CMD=$(jq_get '.running_experiments.on_machine.execute_command // empty')
 EXEC_DIR=$(jq_get '.running_experiments.on_machine.full_path_to_executable // empty')
 PARALLEL_N=$(jq_get '.running_experiments.number_of_experiments_to_run_in_parallel_on_machine // 1')
 
-COLLECT_FE_DIR=$(jq_get '.running_experiments.experiments_collection.path_to_save_experiment_results_on_fe // empty')
-COLLECT_MACHINE_DIR=$(jq_get '.running_experiments.experiments_collection.path_to_saved_experiment_results_on_machine // empty')
+# New collection schema fields
+COLLECT_BASE_PATH=$(jq_get '.running_experiments.experiments_collection.base_path // empty')
+COLLECT_LOOKUP_RULES_JSON=$(jq -c '.running_experiments.experiments_collection.lookup_rules // []' "${CONFIG_PATH}")
+COLLECT_FTRANSFERS_JSON=$(jq -c '.running_experiments.experiments_collection.ftransfers // []' "${CONFIG_PATH}")
 
 [[ -n ${IMAGE_YAML_NAME} ]] || die "Config error: .machine_setup.image_to_use is missing or empty"
 [[ -n ${PAR_PATH} ]] || die "Config error: .running_experiments.on_fe.to_do_parameters_list_path is missing or empty"
 [[ -n ${EXEC_CMD} ]] || die "Config error: .running_experiments.on_machine.execute_command is missing or empty"
 [[ -n ${EXEC_DIR} ]] || die "Config error: .running_experiments.on_machine.full_path_to_executable is missing or empty"
 [[ ${PARALLEL_N} =~ ^[0-9]+$ ]] || die "Config error: .running_experiments.number_of_experiments_to_run_in_parallel_on_machine must be an integer"
+
+# --- Collection config validation ---
+validate_collection_config() {
+	# base_path optional (if omitted, skip collection entirely)
+	if [[ -z ${COLLECT_BASE_PATH} ]]; then
+		log_debug "No collection base_path defined; Phase 4 will be skipped."
+		return 0
+	fi
+	if [[ ${COLLECT_BASE_PATH} =~ [/\\] ]]; then
+		die "Invalid base_path '${COLLECT_BASE_PATH}': must be a simple folder name without slashes"
+	fi
+	# Validate lookup_rules: array of single-key objects
+	local rules_count
+	rules_count=$(jq 'length' <<<"${COLLECT_LOOKUP_RULES_JSON}")
+	declare -A RULE_LABELS=()
+	for ((i = 0; i < rules_count; i++)); do
+		local entry entry_entries key_count label pattern
+		entry=$(jq -c ".[${i}]" <<<"${COLLECT_LOOKUP_RULES_JSON}")
+		# shellcheck disable=SC2312 # split into two commands to retain exit codes individually
+		entry_entries=$(jq 'to_entries' <<<"${entry}")
+		key_count=$(jq 'length' <<<"${entry_entries}")
+		if [[ ${key_count} -ne 1 ]]; then
+			die "lookup_rules entry index ${i} must have exactly one key"
+		fi
+		label=$(jq -r 'keys[0]' <<<"${entry}")
+		pattern=$(jq -r '.[keys[0]]' <<<"${entry}")
+		if [[ -z ${label} || -z ${pattern} ]]; then
+			die "lookup_rules entry index ${i} has empty label or pattern"
+		fi
+		if [[ -n ${RULE_LABELS[${label}]:-} ]]; then
+			die "Duplicate lookup rule label: ${label}"
+		fi
+		RULE_LABELS["${label}"]=1
+	done
+	# Validate ftransfers
+	local transf_count
+	transf_count=$(jq 'length' <<<"${COLLECT_FTRANSFERS_JSON}")
+	for ((i = 0; i < transf_count; i++)); do
+		local look_into subfolder
+		look_into=$(jq -r ".[${i}].look_into // empty" <<<"${COLLECT_FTRANSFERS_JSON}")
+		subfolder=$(jq -r ".[${i}].transfer_to_subfolder_of_base_path // empty" <<<"${COLLECT_FTRANSFERS_JSON}")
+		[[ -n ${look_into} ]] || die "ftransfers[${i}].look_into missing"
+		[[ ${look_into} == /* ]] || die "ftransfers[${i}].look_into must be an absolute path (got '${look_into}')"
+		[[ -n ${subfolder} ]] || die "ftransfers[${i}].transfer_to_subfolder_of_base_path missing"
+		if [[ ${subfolder} =~ [/\\] ]]; then
+			die "ftransfers[${i}].transfer_to_subfolder_of_base_path must be simple folder (no slash): '${subfolder}'"
+		fi
+		# Validate look_for references
+		mapfile -t lf_labels < <(jq -r ".[${i}].look_for[]?" <<<"${COLLECT_FTRANSFERS_JSON}" || true)
+		if ((${#lf_labels[@]} == 0)); then
+			die "ftransfers[${i}].look_for must list at least one rule label"
+		fi
+		for lbl in "${lf_labels[@]}"; do
+			if [[ -z ${RULE_LABELS[${lbl}]:-} ]]; then
+				die "ftransfers[${i}] references unknown rule label: ${lbl}"
+			fi
+		done
+	done
+	log_debug "Collection config validated: base_path='${COLLECT_BASE_PATH}', rules=${rules_count}, transfers=${transf_count}"
+}
+
+validate_collection_config
 
 # --- Phase 0: FE-side selection using done.txt (before any machine work) ---
 # Resolve params file on FE
@@ -322,18 +386,6 @@ fi
 # --- Phase 3: Delegate experiments ---
 log_step "Phase 3/4: Delegating experiments on node"
 if ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" 'echo ok' >/dev/null 2>&1; then
-	# Create a collection marker in the node results dir to later copy only files from this run
-	MARKER_REMOTE_PATH=""
-	if [[ -n ${COLLECT_MACHINE_DIR:-} ]]; then
-		REMOTE_DIR_NO_TRAIL="${COLLECT_MACHINE_DIR%/}"
-		MARKER_REMOTE_PATH="${REMOTE_DIR_NO_TRAIL}/.collect_marker_$(date +%s)"
-		if ! ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" \
-			"bash -lc 'mkdir -p \"${REMOTE_DIR_NO_TRAIL}\" && : > \"${MARKER_REMOTE_PATH}\"'"; then
-			log_warn "Could not create marker file on node; will fallback to copying all .txt files."
-			MARKER_REMOTE_PATH=""
-		fi
-	fi
-
 	log_info "Starting delegation and live log stream from ${NODE_NAME}"
 	# Stream run_delegator.sh output directly; run_delegator already tees to its log.
 	set +e
@@ -359,57 +411,77 @@ else
 	log "SSH not available. Please run on the node: CONFIG_JSON=~/experiments_node/config.json ~/experiments_node/on-machine/run_delegator.sh"
 fi
 
-# --- Phase 4: Transfer results (.txt files) from node to FE ---
-log_step "Phase 4/4: Transferring .txt result files from node to FE"
+log_step "Phase 4/4: Transferring experiment artifacts"
 
-# We copy each individual .txt file from the configured node results directory
-# to the configured FE collected directory. No concatenation.
-if [[ -n ${COLLECT_FE_DIR} && -n ${COLLECT_MACHINE_DIR} ]]; then
-	# New rule: if the JSON value is absolute (starts with /), use it verbatim.
-	# Otherwise interpret it as a folder name under ${HOME}/collected (hardcoded base).
-	if [[ ${COLLECT_FE_DIR} == /* ]]; then
-		FE_TARGET_DIR="${COLLECT_FE_DIR}"
-	else
-		FE_TARGET_DIR="${HOME}/collected/${COLLECT_FE_DIR}"
+if [[ -z ${COLLECT_BASE_PATH} ]]; then
+	log_info "No collection base_path defined; skipping artifact transfer."
+else
+	FE_COLLECTION_ROOT="${HOME}/collected/${COLLECT_BASE_PATH}"
+	mkdir -p "${FE_COLLECTION_ROOT}" || die "Failed to create FE collection root: ${FE_COLLECTION_ROOT}"
+	# Build rule map (label -> pattern)
+	declare -A RULE_MAP=()
+	rules_count=$(jq 'length' <<<"${COLLECT_LOOKUP_RULES_JSON}")
+	for ((ri = 0; ri < rules_count; ri++)); do
+		entry=$(jq -c ".[${ri}]" <<<"${COLLECT_LOOKUP_RULES_JSON}")
+		label=$(jq -r 'keys[0]' <<<"${entry}")
+		pattern=$(jq -r '.[keys[0]]' <<<"${entry}")
+		RULE_MAP["${label}"]="${pattern}"
+	done
+
+	transf_count=$(jq 'length' <<<"${COLLECT_FTRANSFERS_JSON}")
+	if ((transf_count == 0)); then
+		log_info "No ftransfers defined; nothing to collect."
 	fi
-	mkdir -p "${FE_TARGET_DIR}" || die "Unable to create FE collection directory: ${FE_TARGET_DIR}"
-	log_debug "FE collection base hardcoded to ${HOME}/collected; using folder='${COLLECT_FE_DIR}' -> '${FE_TARGET_DIR}'"
 
-	# List .txt files on node within the specified directory (non-recursive)
-	REMOTE_DIR_NO_TRAIL="${COLLECT_MACHINE_DIR%/}"
-	# Only pull files created during this run: use marker if present, else fallback to all .txt
-	mapfile -t REMOTE_TXT_FILES < <(ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" \
-		"bash -lc 'if [[ -n \"${MARKER_REMOTE_PATH:-}\" && -f \"${MARKER_REMOTE_PATH}\" ]]; then \
-						find \"${REMOTE_DIR_NO_TRAIL}\" -maxdepth 1 -type f -name \"*.txt\" -newer \"${MARKER_REMOTE_PATH}\" -print 2>/dev/null; \
-					else \
-						find \"${REMOTE_DIR_NO_TRAIL}\" -maxdepth 1 -type f -name \"*.txt\" -print 2>/dev/null; \
-					fi'" || true)
-
-	if ((${#REMOTE_TXT_FILES[@]} == 0)); then
-		if [[ -n ${MARKER_REMOTE_PATH:-} ]]; then
-			log_warn "No new .txt result files found on node at ${REMOTE_DIR_NO_TRAIL} since marker."
-		else
-			log_warn "No .txt result files found on node at ${REMOTE_DIR_NO_TRAIL}."
+	for ((ti = 0; ti < transf_count; ti++)); do
+		look_into=$(jq -r ".[${ti}].look_into" <<<"${COLLECT_FTRANSFERS_JSON}")
+		subfolder=$(jq -r ".[${ti}].transfer_to_subfolder_of_base_path" <<<"${COLLECT_FTRANSFERS_JSON}")
+		mapfile -t look_for < <(jq -r ".[${ti}].look_for[]" <<<"${COLLECT_FTRANSFERS_JSON}" || true)
+		if [[ -z ${look_into} || -z ${subfolder} ]]; then
+			log_warn "Skipping transfer index ${ti}: missing look_into or subfolder"
+			continue
 		fi
-	else
-		if [[ -n ${MARKER_REMOTE_PATH:-} ]]; then
-			log_info "Found ${#REMOTE_TXT_FILES[@]} new .txt files on node; starting transfer to ${FE_TARGET_DIR}"
-		else
-			log_info "Found ${#REMOTE_TXT_FILES[@]} .txt files on node; starting transfer to ${FE_TARGET_DIR}"
-		fi
-		copied=0
-		for rf in "${REMOTE_TXT_FILES[@]}"; do
-			# Copy one file at a time, preserving filename into FE_TARGET_DIR
-			if scp -o StrictHostKeyChecking=no "root@${NODE_NAME}:${rf}" "${FE_TARGET_DIR}/" | tee -a "${LOG_DIR}/collector_pull.log"; then
-				((copied++)) || true
-			else
-				log_warn "Failed to copy ${rf}"
+		DEST_DIR="${FE_COLLECTION_ROOT}/${subfolder}"
+		mkdir -p "${DEST_DIR}" || die "Failed creating destination: ${DEST_DIR}"
+		# Build remote pattern list from rule labels
+		patterns=()
+		for lbl in "${look_for[@]}"; do
+			pat="${RULE_MAP[${lbl}]:-}"
+			if [[ -n ${pat} ]]; then
+				patterns+=("${pat}")
 			fi
 		done
-		log_success "Transferred ${copied}/${#REMOTE_TXT_FILES[@]} .txt files to ${FE_TARGET_DIR}"
-	fi
-else
-	log_info "Result transfer skipped: missing paths. on-node='${COLLECT_MACHINE_DIR:-}' on-FE='${COLLECT_FE_DIR:-}'"
+		if ((${#patterns[@]} == 0)); then
+			log_warn "Transfer ${ti}: no patterns resolved from labels (${look_for[*]})"
+			continue
+		fi
+		# Build remote script directly enumerating patterns (avoids nested for var reference warnings)
+		remote_list_cmd="cd '${look_into}' 2>/dev/null || exit 0; shopt -s nullglob;"
+		for ptn in "${patterns[@]}"; do
+			ptn_esc=${ptn//"'"/"'\\''"}
+			remote_list_cmd+=" for f in '${ptn_esc}'; do [[ -f \"${f}\" ]] && printf '%s\\n' \"${f}\"; done;"
+		done
+		mapfile -t REMOTE_FILES < <(ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" "bash -lc \"${remote_list_cmd}\"" || true)
+		if ((${#REMOTE_FILES[@]} == 0)); then
+			log_warn "Transfer ${ti}: no files matched in ${look_into} (patterns: ${look_for[*]})"
+			continue
+		fi
+		log_info "Transfer ${ti}: ${#REMOTE_FILES[@]} files from ${look_into} -> ${DEST_DIR} (patterns: ${look_for[*]})"
+		copied=0
+		for f in "${REMOTE_FILES[@]}"; do
+			# Defensive: skip if it contains a slash (shouldn't, non-recursive)
+			if [[ ${f} == */* ]]; then
+				log_debug "Skipping nested path '${f}' (non-recursive mode)"
+				continue
+			fi
+			if scp -q -o StrictHostKeyChecking=no "root@${NODE_NAME}:${look_into%/}/${f}" "${DEST_DIR}/${f}"; then
+				((copied++)) || true
+			else
+				log_warn "Failed to copy ${look_into%/}/${f}"
+			fi
+		done
+		log_success "Transfer ${ti} completed: ${copied}/${#REMOTE_FILES[@]} files copied."
+	done
 fi
 
 log_success "All phases completed. Logs at: ${LOG_DIR}"
