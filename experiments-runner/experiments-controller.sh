@@ -466,27 +466,23 @@ dir="$1"; shift || true
 if [[ ! -d "$dir" ]]; then exit 3; fi
 cd "$dir" || exit 4
 shopt -s nullglob
+# Reconstruct original pattern tokens from env (space-delimited)
+IFS=' ' read -r -a _raw <<<"${PATTERNS_GLOBS:-}" || true
 declare -A seen=()
-for pat in "$@"; do
-  # Expand the glob by iterating directly: when pat has no matches nullglob removes it.
-  for rf in $pat; do
-    [[ -f "$rf" ]] || continue
-    if [[ -z ${seen[$rf]+x} ]]; then
-      printf '%s\n' "$rf"
-      seen[$rf]=1
-    fi
-  done
+for pat in "${_raw[@]}"; do
+	# Expand pattern by iterating over matched filenames (nullglob removes unmatched)
+	for rf in $pat; do
+		[[ -f "$rf" ]] || continue
+		if [[ -z ${seen[$rf]+x} ]]; then
+			printf '%s\n' "$rf"
+			seen[$rf]=1
+		fi
+	done
 done
-# If nothing printed, exit 0 with empty output (caller distinguishes by directory existence test)
 RSCRIPT
 		)
-		# Assemble ssh command: we quote the script blob and directory, then append raw patterns preserved via printf %q
-		pattern_args=()
-		for __p in "${patterns[@]}"; do pattern_args+=("${__p}"); done
-		# Build a command line where each pattern becomes a separate, properly shell-quoted token
-		quoted_patterns=$(printf ' %q' "${pattern_args[@]}")
-		ssh_cmd="bash -lc $'${remote_script//$'\n'/\\n}' '${look_into}'${quoted_patterns}"
-		mapfile -t REMOTE_FILES < <(ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" "${ssh_cmd}" 2>/dev/null || true)
+		PATTERNS_GLOBS=$(printf '%s ' "${patterns[@]}")
+		mapfile -t REMOTE_FILES < <(ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" "PATTERNS_GLOBS=${PATTERNS_GLOBS% } bash -lc $'${remote_script//$'\n'/\n}' '${look_into}'" 2>/dev/null || true)
 		# Exit codes 3/4 mean directory missing / cd failed
 		if ((${#REMOTE_FILES[@]} == 0)); then
 			# Check if remote dir exists to refine warning
