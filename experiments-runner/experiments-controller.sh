@@ -471,6 +471,7 @@ IFS=' ' read -r -a _raw <<<"${PATTERNS_GLOBS:-}" || true
 declare -A seen=()
 for pat in "${_raw[@]}"; do
 	# Expand pattern by iterating over matched filenames (nullglob removes unmatched)
+	# Use an indirection loop that tolerates set -u by localizing rf
 	for rf in $pat; do
 		[[ -f "$rf" ]] || continue
 		if [[ -z ${seen[$rf]+x} ]]; then
@@ -482,8 +483,16 @@ done
 RSCRIPT
 		)
 		PATTERNS_GLOBS=$(printf '%s ' "${patterns[@]}")
-		# Capture raw output (even if empty) for debug analysis
-		REMOTE_RAW=$(ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" "PATTERNS_GLOBS=${PATTERNS_GLOBS% } bash -lc $'${remote_script//$'\n'/\n}' '${look_into}'" 2>/dev/null || true)
+		# Capture raw output (even if empty) for debug analysis, also capture exit status
+		REMOTE_RAW=$(ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" "PATTERNS_GLOBS=${PATTERNS_GLOBS% } bash -lc $'${remote_script//$'\n'/\n}' '${look_into}'; printf '__RC__:%s' $?" 2>/dev/null || true)
+		REMOTE_RC=0
+		if [[ ${REMOTE_RAW} == *'__RC__:'* ]]; then
+			REMOTE_RC=${REMOTE_RAW##*__RC__:}
+			REMOTE_RAW=${REMOTE_RAW%__RC__:*}
+		fi
+		if [[ ${LOG_LEVEL:-info} == debug ]]; then
+			log_debug "Transfer ${ti}: remote enumeration exit code=${REMOTE_RC}; patterns tokens='${PATTERNS_GLOBS% }'"
+		fi
 		IFS=$'\n' read -r -d '' -a REMOTE_FILES < <(printf '%s' "${REMOTE_RAW}" && printf '\0') || true
 		# Exit codes 3/4 mean directory missing / cd failed
 		if ((${#REMOTE_FILES[@]} == 0)); then
@@ -492,19 +501,16 @@ RSCRIPT
 				log_warn "Transfer ${ti}: no files matched in ${look_into} (patterns: ${look_for[*]})"
 				# Extra debug: list directory snapshot and per-pattern simulated expansion
 				if [[ ${LOG_LEVEL:-info} == debug ]]; then
-					log_debug "Transfer ${ti}: directory exists. Gathering debug listing..."
+					log_debug "Transfer ${ti}: directory exists. Gathering debug listing (login=user:root)..."
 					REMOTE_LISTING=$(ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" "bash -lc 'shopt -s nullglob; cd ${look_into} 2>/dev/null || exit 0; ls -1 | head -200'" 2>/dev/null || true)
+					REMOTE_COUNT=$(ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" "bash -lc 'cd ${look_into} 2>/dev/null || exit 0; ls -1 | wc -l'" 2>/dev/null || true)
+					log_debug "Transfer ${ti}: directory file count=${REMOTE_COUNT:-0}"
 					log_debug "Transfer ${ti}: first directory entries (up to 200):\n${REMOTE_LISTING:-<empty>}"
-					for __dbg_pat in "${patterns[@]}"; do
-						# shellcheck disable=SC2016,SC2154 # remote variable expansion happens on node
-						DBG_MATCHES=$(ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" "bash -lc 'shopt -s nullglob; cd ${look_into} 2>/dev/null || exit 0; for rf in ${__dbg_pat}; do [ -f \"${rf}\" ] && printf \"%s\\n\" \"${rf}\"; done'" 2>/dev/null || true)
-						if [[ -n ${DBG_MATCHES} ]]; then
-							log_debug "Pattern '${__dbg_pat}' matched (debug path):\n${DBG_MATCHES}"
-						else
-							log_debug "Pattern '${__dbg_pat}' matched nothing (debug path)."
-						fi
-					done
-					log_debug "Transfer ${ti}: raw remote script output was empty; remote script body may have filtered duplicates or no files present."
+					# Unified deep diagnostics (single remote invocation to avoid per-pattern race / env drift)
+					# shellcheck disable=SC2154,SC2012,SC2250
+					REMOTE_DEEP_DIAG=$(ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" "bash -lc 'set +u; shopt -s nullglob; cd ${look_into} 2>/dev/null || exit 0; echo DIAG:pwd=\"${PWD}\"; echo DIAG:whoami=\"$(whoami)\"; echo DIAG:shellopts=\"$-\"; echo DIAG:patterns_raw=\"${PATTERNS_GLOBS% }\"; fc=$(ls -1 | wc -l); echo DIAG:file_count=\"${fc}\"; echo DIAG:first_entries_start; ls -1 | head -50; echo DIAG:first_entries_end; for p in ${PATTERNS_GLOBS% }; do is_glob=no; [[ ${p} == *[*?[]* ]] && is_glob=yes; echo DIAG:pattern=\"${p}\" glob=${is_glob}; found_any=0; for rf in ${p}; do [ -f \"${rf}\" ] || continue; echo DIAG:match:${p}:${rf}; found_any=1; done; if [ ${found_any} -eq 0 ]; then echo DIAG:pattern_no_matches:${p}; fi; done'" 2>/dev/null || true)
+					log_debug "Transfer ${ti}: deep diagnostics BEGIN\n${REMOTE_DEEP_DIAG}\nTransfer ${ti}: deep diagnostics END"
+					log_debug "Transfer ${ti}: raw remote enumeration produced zero lines; either no plain files matched or only directories existed."
 				fi
 			else
 				log_warn "Transfer ${ti}: directory ${look_into} does not exist"
