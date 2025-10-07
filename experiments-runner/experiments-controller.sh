@@ -455,33 +455,59 @@ else
 			log_warn "Transfer ${ti}: no patterns resolved from labels (${look_for[*]})"
 			continue
 		fi
-		# Build remote script directly enumerating patterns (avoids nested for var reference warnings)
-		remote_list_cmd="cd '${look_into}' 2>/dev/null || exit 0; shopt -s nullglob;"
-		for ptn in "${patterns[@]}"; do
-			ptn_esc=${ptn//"'"/"'\\''"}
-			# Append remote loop over pattern matches: rf is remote variable; escape $ for local shell
-			remote_list_cmd+=" for rf in '${ptn_esc}'; do [[ -f \"\${rf}\" ]] && printf '%s\\n' \"\${rf}\"; done;"
-		done
-		mapfile -t REMOTE_FILES < <(ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" "bash -lc \"${remote_list_cmd}\"" || true)
+		# Remote script: verify directory, enumerate matches safely (no local expansion), print unique list
+		remote_script=$(
+			cat <<'RSCRIPT'
+set -Eeuo pipefail
+dir="$1"; shift || true
+if [[ ! -d "$dir" ]]; then exit 3; fi
+cd "$dir" || exit 4
+shopt -s nullglob
+declare -A seen=()
+for pat in "$@"; do
+  for rf in $pat; do
+    if [[ -f "$rf" ]]; then
+      if [[ -z ${seen[$rf]+x} ]]; then
+        printf '%s\n' "$rf"
+        seen[$rf]=1
+      fi
+    fi
+  done
+done
+RSCRIPT
+		)
+		# Assemble ssh command with patterns passed as args to avoid quoting issues
+		mapfile -t REMOTE_FILES < <(ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" bash -lc "'${remote_script//$'\n'/\\n}' '${look_into}' ${patterns[*]@Q}" 2>/dev/null || true)
+		# Exit codes 3/4 mean directory missing / cd failed
 		if ((${#REMOTE_FILES[@]} == 0)); then
-			log_warn "Transfer ${ti}: no files matched in ${look_into} (patterns: ${look_for[*]})"
+			# Check if remote dir exists to refine warning
+			if ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" "test -d '${look_into}'" 2>/dev/null; then
+				log_warn "Transfer ${ti}: no files matched in ${look_into} (patterns: ${look_for[*]})"
+			else
+				log_warn "Transfer ${ti}: directory ${look_into} does not exist"
+			fi
 			continue
 		fi
-		log_info "Transfer ${ti}: ${#REMOTE_FILES[@]} files from ${look_into} -> ${DEST_DIR} (patterns: ${look_for[*]})"
-		copied=0
+		log_info "Transfer ${ti}: ${#REMOTE_FILES[@]} unique files from ${look_into} -> ${DEST_DIR} (patterns: ${look_for[*]})"
+		copied=0 failed=0
 		for f in "${REMOTE_FILES[@]}"; do
-			# Defensive: skip if it contains a slash (shouldn't, non-recursive)
+			# Skip if contains slash (should not in non-recursive mode)
 			if [[ ${f} == */* ]]; then
-				log_debug "Skipping nested path '${f}' (non-recursive mode)"
+				log_debug "Skipping nested path '${f}'"
 				continue
 			fi
 			if scp -q -o StrictHostKeyChecking=no "root@${NODE_NAME}:${look_into%/}/${f}" "${DEST_DIR}/${f}"; then
 				((copied++)) || true
 			else
+				((failed++)) || true
 				log_warn "Failed to copy ${look_into%/}/${f}"
 			fi
 		done
-		log_success "Transfer ${ti} completed: ${copied}/${#REMOTE_FILES[@]} files copied."
+		if ((failed > 0)); then
+			log_warn "Transfer ${ti} partial: copied=${copied} failed=${failed} total=${#REMOTE_FILES[@]}"
+		else
+			log_success "Transfer ${ti} completed: ${copied}/${#REMOTE_FILES[@]} files copied."
+		fi
 	done
 fi
 
