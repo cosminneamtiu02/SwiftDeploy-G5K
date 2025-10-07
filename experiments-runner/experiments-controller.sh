@@ -482,18 +482,40 @@ done
 RSCRIPT
 		)
 		PATTERNS_GLOBS=$(printf '%s ' "${patterns[@]}")
-		mapfile -t REMOTE_FILES < <(ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" "PATTERNS_GLOBS=${PATTERNS_GLOBS% } bash -lc $'${remote_script//$'\n'/\n}' '${look_into}'" 2>/dev/null || true)
+		# Capture raw output (even if empty) for debug analysis
+		REMOTE_RAW=$(ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" "PATTERNS_GLOBS=${PATTERNS_GLOBS% } bash -lc $'${remote_script//$'\n'/\n}' '${look_into}'" 2>/dev/null || true)
+		IFS=$'\n' read -r -d '' -a REMOTE_FILES < <(printf '%s' "${REMOTE_RAW}" && printf '\0') || true
 		# Exit codes 3/4 mean directory missing / cd failed
 		if ((${#REMOTE_FILES[@]} == 0)); then
 			# Check if remote dir exists to refine warning
 			if ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" "test -d '${look_into}'" 2>/dev/null; then
 				log_warn "Transfer ${ti}: no files matched in ${look_into} (patterns: ${look_for[*]})"
+				# Extra debug: list directory snapshot and per-pattern simulated expansion
+				if [[ ${LOG_LEVEL:-info} == debug ]]; then
+					log_debug "Transfer ${ti}: directory exists. Gathering debug listing..."
+					REMOTE_LISTING=$(ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" "bash -lc 'shopt -s nullglob; cd ${look_into} 2>/dev/null || exit 0; ls -1 | head -200'" 2>/dev/null || true)
+					log_debug "Transfer ${ti}: first directory entries (up to 200):\n${REMOTE_LISTING:-<empty>}"
+					for __dbg_pat in "${patterns[@]}"; do
+						# shellcheck disable=SC2016,SC2154 # remote variable expansion happens on node
+						DBG_MATCHES=$(ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" "bash -lc 'shopt -s nullglob; cd ${look_into} 2>/dev/null || exit 0; for rf in ${__dbg_pat}; do [ -f \"${rf}\" ] && printf \"%s\\n\" \"${rf}\"; done'" 2>/dev/null || true)
+						if [[ -n ${DBG_MATCHES} ]]; then
+							log_debug "Pattern '${__dbg_pat}' matched (debug path):\n${DBG_MATCHES}"
+						else
+							log_debug "Pattern '${__dbg_pat}' matched nothing (debug path)."
+						fi
+					done
+					log_debug "Transfer ${ti}: raw remote script output was empty; remote script body may have filtered duplicates or no files present."
+				fi
 			else
 				log_warn "Transfer ${ti}: directory ${look_into} does not exist"
 			fi
 			continue
 		fi
 		log_info "Transfer ${ti}: ${#REMOTE_FILES[@]} unique files from ${look_into} -> ${DEST_DIR} (patterns: ${look_for[*]})"
+		if [[ ${LOG_LEVEL:-info} == debug ]]; then
+			printf '%s\n' "${REMOTE_FILES[@]:0:20}" | sed 's/^/DEBUG first-matches: /' || true
+			((${#REMOTE_FILES[@]} > 20)) && log_debug "(only first 20 names logged)"
+		fi
 		copied=0 failed=0
 		for f in "${REMOTE_FILES[@]}"; do
 			# Skip if contains slash (should not in non-recursive mode)
