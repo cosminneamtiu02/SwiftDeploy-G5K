@@ -455,7 +455,10 @@ else
 			log_warn "Transfer ${ti}: no patterns resolved from labels (${look_for[*]})"
 			continue
 		fi
-		# Remote script: verify directory, enumerate matches safely (no local expansion), print unique list
+		# Remote script: verify directory, enumerate matches (need remote shell glob expansion). We
+		# intentionally do NOT double-quote the patterns when invoking the script so the remote shell
+		# expands them in the inner loop. Patterns that don't match expand to themselves unless nullglob is on;
+		# we enable nullglob so unmatched patterns vanish (prevent spurious literal pattern names).
 		remote_script=$(
 			cat <<'RSCRIPT'
 set -Eeuo pipefail
@@ -465,19 +468,25 @@ cd "$dir" || exit 4
 shopt -s nullglob
 declare -A seen=()
 for pat in "$@"; do
+  # Expand the glob by iterating directly: when pat has no matches nullglob removes it.
   for rf in $pat; do
-    if [[ -f "$rf" ]]; then
-      if [[ -z ${seen[$rf]+x} ]]; then
-        printf '%s\n' "$rf"
-        seen[$rf]=1
-      fi
+    [[ -f "$rf" ]] || continue
+    if [[ -z ${seen[$rf]+x} ]]; then
+      printf '%s\n' "$rf"
+      seen[$rf]=1
     fi
   done
 done
+# If nothing printed, exit 0 with empty output (caller distinguishes by directory existence test)
 RSCRIPT
 		)
-		# Assemble ssh command with patterns passed as args to avoid quoting issues
-		mapfile -t REMOTE_FILES < <(ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" bash -lc "'${remote_script//$'\n'/\\n}' '${look_into}' ${patterns[*]@Q}" 2>/dev/null || true)
+		# Assemble ssh command: we quote the script blob and directory, then append raw patterns preserved via printf %q
+		pattern_args=()
+		for __p in "${patterns[@]}"; do pattern_args+=("${__p}"); done
+		# Build a command line where each pattern becomes a separate, properly shell-quoted token
+		quoted_patterns=$(printf ' %q' "${pattern_args[@]}")
+		ssh_cmd="bash -lc $'${remote_script//$'\n'/\\n}' '${look_into}'${quoted_patterns}"
+		mapfile -t REMOTE_FILES < <(ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" "${ssh_cmd}" 2>/dev/null || true)
 		# Exit codes 3/4 mean directory missing / cd failed
 		if ((${#REMOTE_FILES[@]} == 0)); then
 			# Check if remote dir exists to refine warning
