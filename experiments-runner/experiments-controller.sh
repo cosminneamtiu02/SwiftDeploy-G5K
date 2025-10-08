@@ -506,9 +506,55 @@ RSCRIPT
 					REMOTE_COUNT=$(ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" "bash -lc 'cd ${look_into} 2>/dev/null || exit 0; ls -1 | wc -l'" 2>/dev/null || true)
 					log_debug "Transfer ${ti}: directory file count=${REMOTE_COUNT:-0}"
 					log_debug "Transfer ${ti}: first directory entries (up to 200):\n${REMOTE_LISTING:-<empty>}"
-					# Unified deep diagnostics (single remote invocation to avoid per-pattern race / env drift)
-					# shellcheck disable=SC2154,SC2012,SC2250
-					REMOTE_DEEP_DIAG=$(ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" "bash -lc 'set +u; shopt -s nullglob; cd ${look_into} 2>/dev/null || exit 0; echo DIAG:pwd=\"${PWD}\"; echo DIAG:whoami=\"$(whoami)\"; echo DIAG:shellopts=\"$-\"; echo DIAG:patterns_raw=\"${PATTERNS_GLOBS% }\"; fc=$(ls -1 | wc -l); echo DIAG:file_count=\"${fc}\"; echo DIAG:first_entries_start; ls -1 | head -50; echo DIAG:first_entries_end; for p in ${PATTERNS_GLOBS% }; do is_glob=no; [[ ${p} == *[*?[]* ]] && is_glob=yes; echo DIAG:pattern=\"${p}\" glob=${is_glob}; found_any=0; for rf in ${p}; do [ -f \"${rf}\" ] || continue; echo DIAG:match:${p}:${rf}; found_any=1; done; if [ ${found_any} -eq 0 ]; then echo DIAG:pattern_no_matches:${p}; fi; done'" 2>/dev/null || true)
+					# Unified deep diagnostics via remote heredoc script (avoid unbound vars under set -u)
+					REMOTE_DEEP_DIAG=$(ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" bash -lc $'cat > /tmp/__deep_diag.sh <<"DIAGEOF"
+set +u
+set -o pipefail
+shopt -s nullglob
+echo DIAG:pwd="${PWD}"
+echo DIAG:whoami="$(whoami)"
+echo DIAG:shellopts="$-"
+echo DIAG:patterns_raw="${PATTERNS_GLOBS% }"
+# List every regular file with size and mtime for context
+echo DIAG:all_files_begin
+for f in *; do
+	[ -f "$f" ] || continue
+	sz=$(wc -c <"$f" 2>/dev/null || echo 0)
+	mt=$(stat -c %Y "$f" 2>/dev/null || echo 0)
+	echo DIAG:file_meta:"$f":size="$sz":mtime_epoch="$mt"
+done
+echo DIAG:all_files_end
+# Count plain files
+plain_count=0; for f in *; do [ -f "$f" ] && plain_count=$((plain_count+1)); done
+echo DIAG:plain_file_count="$plain_count"
+echo DIAG:first_entries_start
+ls -1 | head -50 || true
+echo DIAG:first_entries_end
+# Per-pattern detailed expansion
+for p in ${PATTERNS_GLOBS% }; do
+	is_glob=no
+	case "$p" in *[*?[]* ) is_glob=yes;; esac
+	echo DIAG:pattern_header:"$p":glob="$is_glob"
+	found_any=0
+	for rf in $p; do
+		[ -f "$rf" ] || continue
+		found_any=1
+		sz=$(wc -c <"$rf" 2>/dev/null || echo 0)
+		mt=$(stat -c %Y "$rf" 2>/dev/null || echo 0)
+		echo DIAG:match:"$p":"$rf":size="$sz":mtime_epoch="$mt"
+	done
+	if [ $found_any -eq 0 ]; then
+		echo DIAG:pattern_no_matches:"$p"
+	fi
+done
+# Additional diagnostics: show nullglob state & environment subset
+shopt -p nullglob
+echo DIAG:env_HOME="$HOME"
+echo DIAG:env_USER="$USER"
+DIAGEOF
+bash /tmp/__deep_diag.sh 2>&1 || true
+rm -f /tmp/__deep_diag.sh
+' 2>/dev/null || true)
 					log_debug "Transfer ${ti}: deep diagnostics BEGIN\n${REMOTE_DEEP_DIAG}\nTransfer ${ti}: deep diagnostics END"
 					log_debug "Transfer ${ti}: raw remote enumeration produced zero lines; either no plain files matched or only directories existed."
 				fi
