@@ -458,6 +458,8 @@ else
 				fi
 			fi
 		done
+		# Always show patterns used at info level to tie filenames to patterns
+		log_info "Transfer ${ti}: patterns used (raw) = ${patterns[*]} (labels: ${look_for[*]})"
 		if ((${#patterns[@]} == 0)); then
 			log_warn "Transfer ${ti}: no patterns resolved from labels (${look_for[*]})"
 			continue
@@ -517,6 +519,36 @@ RSCRIPT
 			# Check if remote dir exists to refine warning
 			if ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" "test -d '${look_into}'" 2>/dev/null; then
 				log_warn "Transfer ${ti}: no files matched in ${look_into} (patterns labels: ${look_for[*]} ; raw patterns: ${patterns[*]})"
+				# FE destination summary: what is currently there, and how patterns compare locally
+				DEST_COUNT=$(find "${DEST_DIR}" -mindepth 1 -maxdepth 1 -printf '.' 2>/dev/null | wc -c | tr -d '[:space:]' || true)
+				log_info "Transfer ${ti} FE destination pre-state: '${DEST_DIR}' entries=${DEST_COUNT:-0}"
+				if [[ ${DEST_COUNT:-0} -gt 0 ]]; then
+					log_info "Transfer ${ti} FE destination first entries:"
+					find "${DEST_DIR}" -mindepth 1 -maxdepth 1 -printf '%f\n' 2>/dev/null | head -20 | sed 's/^/FE: /' | while IFS= read -r L; do log_info "${L}"; done
+					# Compare first entries to patterns (name-based)
+					mapfile -t __FE_SAMPLES < <(find "${DEST_DIR}" -mindepth 1 -maxdepth 1 -printf '%f\n' 2>/dev/null | head -20 || true)
+					for __fname in "${__FE_SAMPLES[@]}"; do
+						match_list=()
+						for p in "${patterns[@]}"; do
+							# shellcheck disable=SC2053
+							if [[ ${__fname} == ${p} ]]; then match_list+=("${p}"); fi
+						done
+						if ((${#match_list[@]} > 0)); then
+							log_info "FE:REASON: file '${__fname}' matches patterns: ${match_list[*]}"
+						else
+							log_info "FE:REASON: file '${__fname}' matches no provided patterns"
+						fi
+					done
+					# Per-pattern counts at destination
+					DEST_PER_PATTERN=()
+					for p in "${patterns[@]}"; do
+						# Use local shell globbing inside a subshell to avoid polluting state
+						cnt=$(bash -lc "shopt -s nullglob; cd '${DEST_DIR}' 2>/dev/null || exit 0; set -- ${p}; echo \$#" 2>/dev/null || true)
+						cnt=${cnt:-0}
+						DEST_PER_PATTERN+=("'${p}'=${cnt}")
+					done
+					log_info "Transfer ${ti} FE destination per-pattern matches: ${DEST_PER_PATTERN[*]}"
+				fi
 				# Always gather a concise diagnostic summary to explain the zero-match
 				REMOTE_DEEP_DIAG=$(ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" PATTERNS_GLOBS="${PATTERNS_GLOBS% }" bash -lc $'cat > /tmp/__deep_diag.sh <<"DIAGEOF"
 set +u
@@ -685,7 +717,9 @@ rm -f /tmp/__locator.sh
 			fi
 			continue
 		fi
-		log_info "Transfer ${ti}: ${#REMOTE_FILES[@]} unique files from ${look_into} -> ${DEST_DIR} (patterns: ${look_for[*]})"
+		# FE destination pre-state
+		DEST_BEFORE_COUNT=$(find "${DEST_DIR}" -mindepth 1 -maxdepth 1 -printf '.' 2>/dev/null | wc -c | tr -d '[:space:]' || true)
+		log_info "Transfer ${ti}: ${#REMOTE_FILES[@]} unique files from ${look_into} -> ${DEST_DIR} (patterns: ${look_for[*]}), FE entries before=${DEST_BEFORE_COUNT:-0}"
 		# Post-match reasoning: for each matched file, show which patterns it matches (local bash pattern match)
 		if [[ ${LOG_LEVEL:-info} == debug ]]; then
 			max_show=$((${#REMOTE_FILES[@]} < 50 ? ${#REMOTE_FILES[@]} : 50))
@@ -734,6 +768,37 @@ rm -f /tmp/__locator.sh
 				log_warn "Failed to copy ${look_into%/}/${f}"
 			fi
 		done
+		# FE destination post-state and summary
+		DEST_AFTER_COUNT=$(find "${DEST_DIR}" -mindepth 1 -maxdepth 1 -printf '.' 2>/dev/null | wc -c | tr -d '[:space:]' || true)
+		DA=${DEST_AFTER_COUNT:-0}
+		DB=${DEST_BEFORE_COUNT:-0}
+		DELTA=$((DA - DB))
+		log_info "Transfer ${ti} FE destination after copy: entries=${DA} (delta=${DELTA})"
+		# Log first 10 files now present
+		log_info "Transfer ${ti} FE destination first entries after copy:"
+		find "${DEST_DIR}" -mindepth 1 -maxdepth 1 -printf '%f\n' 2>/dev/null | head -10 | sed 's/^/FE: /' | while IFS= read -r L; do log_info "${L}"; done
+		# Compare first entries to patterns after copy
+		mapfile -t __FE_SAMPLES2 < <(find "${DEST_DIR}" -mindepth 1 -maxdepth 1 -printf '%f\n' 2>/dev/null | head -10 || true)
+		for __fname in "${__FE_SAMPLES2[@]}"; do
+			match_list=()
+			for p in "${patterns[@]}"; do
+				# shellcheck disable=SC2053
+				if [[ ${__fname} == ${p} ]]; then match_list+=("${p}"); fi
+			done
+			if ((${#match_list[@]} > 0)); then
+				log_info "FE:REASON: file '${__fname}' matches patterns: ${match_list[*]}"
+			else
+				log_info "FE:REASON: file '${__fname}' matches no provided patterns"
+			fi
+		done
+		# Destination per-pattern match counts
+		DEST_PER_PATTERN_AFTER=()
+		for p in "${patterns[@]}"; do
+			cnt=$(bash -lc "shopt -s nullglob; cd '${DEST_DIR}' 2>/dev/null || exit 0; set -- ${p}; echo \$#" 2>/dev/null || true)
+			cnt=${cnt:-0}
+			DEST_PER_PATTERN_AFTER+=("'${p}'=${cnt}")
+		done
+		log_info "Transfer ${ti} FE destination per-pattern matches (after): ${DEST_PER_PATTERN_AFTER[*]}"
 		if ((failed > 0)); then
 			log_warn "Transfer ${ti} partial: copied=${copied} failed=${failed} total=${#REMOTE_FILES[@]}"
 		else
