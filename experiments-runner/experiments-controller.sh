@@ -517,39 +517,8 @@ RSCRIPT
 			# Check if remote dir exists to refine warning
 			if ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" "test -d '${look_into}'" 2>/dev/null; then
 				log_warn "Transfer ${ti}: no files matched in ${look_into} (patterns labels: ${look_for[*]} ; raw patterns: ${patterns[*]})"
-				if [[ ${LOG_LEVEL:-info} == debug ]]; then
-					# Provide heuristic suggestions
-					for p in "${patterns[@]}"; do
-						case "${p}" in
-							*.*) ;; # has an extension or dot
-							*) log_debug "Transfer ${ti}: suggestion: pattern '${p}' has no wildcard and no extension; if you intended all .txt files, use '*.txt'" ;;
-						esac
-						if [[ ${p} == txt || ${p} == log || ${p} == out ]]; then
-							log_debug "Transfer ${ti}: suggestion: pattern '${p}' looks like an extension keyword; consider '*.${p}'"
-						fi
-						if [[ ${p} == */* ]]; then
-							log_debug "Transfer ${ti}: note: pattern '${p}' includes a slash; collector is non-recursive and will ignore nested paths unless file sits exactly in target dir"
-						fi
-						if [[ ${p} == *'*'*'*'* ]]; then
-							log_debug "Transfer ${ti}: note: pattern '${p}' contains multiple consecutive *; verify you intended that"
-						fi
-						if [[ ${p} == .* ]]; then
-							log_debug "Transfer ${ti}: note: hidden file pattern '${p}' used; ensure producing process creates dotfiles if expected"
-						fi
-						if [[ ${p} != *[*?[]* ]]; then
-							log_debug "Transfer ${ti}: classification: '${p}' treated as literal (no wildcards)"
-						fi
-					done
-				fi
-				# Extra debug: list directory snapshot and per-pattern simulated expansion
-				if [[ ${LOG_LEVEL:-info} == debug ]]; then
-					log_debug "Transfer ${ti}: directory exists. Gathering debug listing (login=user:root)..."
-					REMOTE_LISTING=$(ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" "bash -lc 'shopt -s nullglob; cd ${look_into} 2>/dev/null || exit 0; ls -1 | head -200'" 2>/dev/null || true)
-					REMOTE_COUNT=$(ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" "bash -lc 'cd ${look_into} 2>/dev/null || exit 0; ls -1 | wc -l'" 2>/dev/null || true)
-					log_debug "Transfer ${ti}: directory file count=${REMOTE_COUNT:-0}"
-					log_debug "Transfer ${ti}: first directory entries (up to 200):\n${REMOTE_LISTING:-<empty>}"
-					# Unified deep diagnostics via remote heredoc script (avoid unbound vars under set -u)
-					REMOTE_DEEP_DIAG=$(ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" PATTERNS_GLOBS="${PATTERNS_GLOBS% }" bash -lc $'cat > /tmp/__deep_diag.sh <<"DIAGEOF"
+				# Always gather a concise diagnostic summary to explain the zero-match
+				REMOTE_DEEP_DIAG=$(ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" PATTERNS_GLOBS="${PATTERNS_GLOBS% }" bash -lc $'cat > /tmp/__deep_diag.sh <<"DIAGEOF"
 set +u
 set -o pipefail
 shopt -s nullglob
@@ -557,6 +526,9 @@ echo DIAG:pwd="${PWD}"
 echo DIAG:whoami="$(whoami)"
 echo DIAG:shellopts="$-"
 echo DIAG:patterns_raw="${PATTERNS_GLOBS% }"
+# Total entries in directory (includes dirs)
+entries_count=$(ls -A1 2>/dev/null | wc -l | tr -d "[:space:]")
+echo DIAG:entries_count="$entries_count"
 # List every regular file with size and mtime for context
 echo DIAG:all_files_begin
 for f in *; do
@@ -577,43 +549,73 @@ for p in ${PATTERNS_GLOBS% }; do
 	is_glob=no
 	case "$p" in *[*?[]* ) is_glob=yes;; esac
 	echo DIAG:pattern_header:"$p":glob="$is_glob"
-	found_any=0
+	count=0
 	for rf in $p; do
 		[ -f "$rf" ] || continue
-		found_any=1
+		count=$((count+1))
 		sz=$(wc -c <"$rf" 2>/dev/null || echo 0)
 		mt=$(stat -c %Y "$rf" 2>/dev/null || echo 0)
 		echo DIAG:match:"$p":"$rf":size="$sz":mtime_epoch="$mt"
 	done
-	if [ $found_any -eq 0 ]; then
+	if [ $count -eq 0 ]; then
 		echo DIAG:pattern_no_matches:"$p"
 	fi
+	echo DIAG:pattern_count:"$p":count="$count"
 done
 # Additional diagnostics: show nullglob state & environment subset
 shopt -p nullglob
 echo DIAG:env_HOME="$HOME"
 echo DIAG:env_USER="$USER"
 DIAGEOF
+cd "${look_into}" 2>/dev/null || true
 bash /tmp/__deep_diag.sh 2>&1 || true
 rm -f /tmp/__deep_diag.sh
 ' 2>/dev/null || true)
-					log_debug "Transfer ${ti}: deep diagnostics BEGIN\n${REMOTE_DEEP_DIAG}\nTransfer ${ti}: deep diagnostics END"
-					# Classify reason for zero-match using diagnostics
-					if [[ -n ${REMOTE_DEEP_DIAG} ]]; then
-						match_count=$(printf '%s\n' "${REMOTE_DEEP_DIAG}" | grep -c '^DIAG:match:' || true)
-						plain_count=$(printf '%s\n' "${REMOTE_DEEP_DIAG}" | sed -n 's/^DIAG:plain_file_count="\([0-9]\+\)".*/\1/p' | head -1)
-						plain_count=${plain_count:-0}
-						if [[ ${REMOTE_COUNT:-0} -eq 0 ]]; then
-							log_debug "Transfer ${ti}: classification=dir_empty (no entries in directory)."
-						elif [[ ${plain_count} -eq 0 && ${REMOTE_COUNT:-0} -gt 0 ]]; then
-							log_debug "Transfer ${ti}: classification=only_directories (no regular files present)."
-						elif [[ ${match_count} -eq 0 && ${plain_count} -gt 0 ]]; then
-							log_debug "Transfer ${ti}: classification=patterns_mismatch (regular files exist but none matched)."
-						else
-							log_debug "Transfer ${ti}: classification=unknown (needs manual inspection of DIAG block)."
-						fi
+				# Parse and log a concise summary at info level
+				if [[ -n ${REMOTE_DEEP_DIAG} ]]; then
+					ENTRIES_COUNT=$(printf '%s\n' "${REMOTE_DEEP_DIAG}" | sed -n 's/^DIAG:entries_count="\([0-9]\+\)".*/\1/p' | head -1)
+					PLAIN_COUNT=$(printf '%s\n' "${REMOTE_DEEP_DIAG}" | sed -n 's/^DIAG:plain_file_count="\([0-9]\+\)".*/\1/p' | head -1)
+					NULLGLOB_STATE=$(printf '%s\n' "${REMOTE_DEEP_DIAG}" | sed -n 's/^shopt -\([su]\) nullglob$/\1/p' | head -1)
+					case "${NULLGLOB_STATE}" in s) NULLGLOB_STATE="on" ;; u) NULLGLOB_STATE="off" ;; *) NULLGLOB_STATE="unknown" ;; esac
+					# Build per-pattern counts summary
+					PER_PATTERN_SUMMARY=()
+					for p in "${patterns[@]}"; do
+						P_ESC=$(printf '%s' "${p}" | sed 's/[\\.*\[\]\^$]/\\&/g')
+						cnt=$(printf '%s\n' "${REMOTE_DEEP_DIAG}" | sed -n "s/^DIAG:pattern_count:\"${P_ESC}\":count=\"\([0-9]\+\)\".*/\1/p" | head -1 || true)
+						cnt=${cnt:-0}
+						PER_PATTERN_SUMMARY+=("'${p}'=${cnt}")
+					done
+					log_info "Transfer ${ti} diagnosis: dir_entries=${ENTRIES_COUNT:-0}, regular_files=${PLAIN_COUNT:-0}, nullglob=${NULLGLOB_STATE}"
+					log_info "Transfer ${ti} per-pattern matches: ${PER_PATTERN_SUMMARY[*]}"
+					# Show a few example regular files if any exist
+					if [[ ${PLAIN_COUNT:-0} -gt 0 ]]; then
+						EX_SAMPLES=$(printf '%s\n' "${REMOTE_DEEP_DIAG}" | awk -F: '/^DIAG:file_meta:/{print $3" (size="gensub(/^size="/,"","g",$4)")"}' | head -5 | tr '\n' ', ' | sed 's/, $//')
+						[[ -n ${EX_SAMPLES} ]] && log_info "Transfer ${ti} sample files: ${EX_SAMPLES}"
 					fi
-					log_debug "Transfer ${ti}: raw remote enumeration produced zero lines; either no plain files matched or only directories existed."
+					# Heuristic suggestions (printed regardless of debug to aid next runs)
+					for p in "${patterns[@]}"; do
+						if [[ ${p} != *[*?[]* ]]; then
+							log_info "Hint: pattern '${p}' is treated as a literal (no wildcards). If you intended an extension, use '*.${p}'."
+						fi
+						if [[ ${p} == */* ]]; then
+							log_info "Note: pattern '${p}' includes a slash; collector is non-recursive and only matches files directly in ${look_into}."
+						fi
+					done
+					# Additional classification line
+					MATCH_COUNT_TOTAL=$(printf '%s\n' "${REMOTE_DEEP_DIAG}" | grep -c '^DIAG:match:' || true)
+					if [[ ${ENTRIES_COUNT:-0} -eq 0 ]]; then
+						log_info "Transfer ${ti} classification: dir_empty (no entries in directory)."
+					elif [[ ${PLAIN_COUNT:-0} -eq 0 && ${ENTRIES_COUNT:-0} -gt 0 ]]; then
+						log_info "Transfer ${ti} classification: only_directories (no regular files present at top level)."
+					elif [[ ${MATCH_COUNT_TOTAL} -eq 0 && ${PLAIN_COUNT:-0} -gt 0 ]]; then
+						log_info "Transfer ${ti} classification: patterns_mismatch (regular files exist but did not match the given patterns)."
+					else
+						log_info "Transfer ${ti} classification: unknown; inspect full diagnostics with --verbose."
+					fi
+				fi
+				# Full diagnostics only under debug to avoid excessive noise
+				if [[ ${LOG_LEVEL:-info} == debug ]]; then
+					log_debug "Transfer ${ti}: deep diagnostics BEGIN\n${REMOTE_DEEP_DIAG}\nTransfer ${ti}: deep diagnostics END"
 				fi
 			else
 				log_warn "Transfer ${ti}: directory ${look_into} does not exist"
