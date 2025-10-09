@@ -471,6 +471,63 @@ else
 		if [[ ${LOG_LEVEL:-info} == debug ]]; then
 			log_debug "Transfer ${ti}: summary — node='${NODE_NAME}' dir='${look_into}' dest='${DEST_DIR}' non-recursive=true regular-files-only=true dedup=true"
 		fi
+		# Remote pre-scan: show how many entries and regular files exist and list all entries; also show per-pattern matches
+		PATTERNS_GLOBS_PRE=$(printf '%s ' "${patterns[@]}")
+		REMOTE_PRESCAN=$(ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" PATTERNS_GLOBS="${PATTERNS_GLOBS_PRE% }" bash -lc $'cat > /tmp/__prescan.sh <<"PREEOF"
+set +u
+set -o pipefail
+shopt -s nullglob
+# Print counts and list entries in current dir
+echo PRE:pwd="$PWD"
+entries_total=$(find . -maxdepth 1 -mindepth 1 -printf . 2>/dev/null | wc -c | tr -d "[:space:]")
+reg_total=$(find . -maxdepth 1 -mindepth 1 -type f -printf . 2>/dev/null | wc -c | tr -d "[:space:]")
+echo PRE:entries_total="$entries_total"
+echo PRE:regular_total="$reg_total"
+find . -maxdepth 1 -mindepth 1 -printf 'PRE:list:%f\\n' 2>/dev/null || true
+# Per-pattern matches
+for p in ${PATTERNS_GLOBS% }; do
+  echo PREPAT:pattern:"$p"
+  found=0
+  for rf in $p; do
+    [ -f "$rf" ] || continue
+    echo PREPAT:match:"$p":"$rf"
+    found=1
+  done
+  if [ $found -eq 0 ]; then
+    echo PREPAT:nomatch:"$p"
+  fi
+done
+PREEOF
+cd "${look_into}" 2>/dev/null || { echo PRE:missing=1; exit 0; }
+bash /tmp/__prescan.sh 2>/dev/null || true
+rm -f /tmp/__prescan.sh
+' 2>/dev/null || true)
+		# Log concise prescan summary and details
+		if [[ -n ${REMOTE_PRESCAN} ]]; then
+			if printf '%s\n' "${REMOTE_PRESCAN}" | grep -q '^PRE:missing=1'; then
+				log_info "Transfer ${ti} source prescan: directory missing: ${look_into}"
+			else
+				SRC_ENTRIES=$(printf '%s\n' "${REMOTE_PRESCAN}" | sed -n 's/^PRE:entries_total="\([0-9]\+\)".*/\1/p' | head -1)
+				SRC_REGULAR=$(printf '%s\n' "${REMOTE_PRESCAN}" | sed -n 's/^PRE:regular_total="\([0-9]\+\)".*/\1/p' | head -1)
+				log_info "Transfer ${ti} source prescan: entries=${SRC_ENTRIES:-0}, regular_files=${SRC_REGULAR:-0}"
+				# List all entries (top-level)
+				printf '%s\n' "${REMOTE_PRESCAN}" | sed -n 's/^PRE:list://p' | while IFS= read -r E; do
+					[[ -n ${E} ]] && log_info "SRC: ${E}"
+				done
+				# Per-pattern matched files
+				for p in "${patterns[@]}"; do
+					log_info "SRC:pattern '${p}' -> matches:"
+					# Escape pattern for sed delimiter
+					PE=$(printf '%s' "${p}" | sed 's/[\\.*\[\]\^$]/\\&/g')
+					printf '%s\n' "${REMOTE_PRESCAN}" | sed -n "s/^PREPAT:match:\"${PE}\":\"\(.*\)\"/\1/p" | while IFS= read -r M; do
+						log_info "SRC:  ${M}"
+					done
+					if printf '%s\n' "${REMOTE_PRESCAN}" | grep -q "^PREPAT:nomatch:\"${PE}\"$"; then
+						log_info "SRC:  <no matches>"
+					fi
+				done
+			fi
+		fi
 		remote_script=$(
 			cat <<'RSCRIPT'
 set -Eeuo pipefail
