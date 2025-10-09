@@ -613,6 +613,69 @@ rm -f /tmp/__deep_diag.sh
 						log_info "Transfer ${ti} classification: unknown; inspect full diagnostics with --verbose."
 					fi
 				fi
+				# Locator hints: probe nearby directories and a shallow recursive search under EXEC_DIR
+				ALT_DIRS=()
+				if [[ ${look_into} == */result ]]; then ALT_DIRS+=("${look_into%/result}/results"); fi
+				if [[ ${look_into} == */results ]]; then ALT_DIRS+=("${look_into%/results}/result"); fi
+				ALT_DIRS+=("${EXEC_DIR%/}/results" "${EXEC_DIR%/}/result")
+				# Deduplicate and drop the original look_into if present
+				DEDUP_ALT=()
+				for __d in "${ALT_DIRS[@]}"; do
+					[[ ${__d} == "${look_into}" ]] && continue
+					skip=false
+					for __e in "${DEDUP_ALT[@]:-}"; do
+						if [[ ${__d} == "${__e}" ]]; then
+							skip=true
+							break
+						fi
+					done
+					${skip} || DEDUP_ALT+=("${__d}")
+				done
+				if ((${#DEDUP_ALT[@]} > 0)); then
+					ALT_DIRS_STR=$(printf '%s ' "${DEDUP_ALT[@]}")
+					LOCATOR_OUT=$(ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" ALT_DIRS="${ALT_DIRS_STR% }" PATTERNS_GLOBS="${PATTERNS_GLOBS% }" EXEC_DIR_REMOTE="${EXEC_DIR}" bash -lc $'cat > /tmp/__locator.sh <<"LOCEOF"
+set +u
+set -o pipefail
+shopt -s nullglob
+# Probe alternative directories non-recursively
+for d in ${ALT_DIRS}; do
+  if [ -d "$d" ]; then
+    entries=$(ls -A1 "$d" 2>/dev/null | wc -l | tr -d "[:space:]")
+    plain=0; while IFS= read -r f; do [ -f "$d/$f" ] && plain=$((plain+1)); done < <(ls -A1 "$d" 2>/dev/null || true)
+    echo LOC:dir:"$d":entries="$entries":plain="$plain"
+    cd "$d" 2>/dev/null || continue
+    for p in ${PATTERNS_GLOBS% }; do
+      cnt=0
+      for rf in $p; do [ -f "$rf" ] && cnt=$((cnt+1)); done
+      echo LOC:pattern_count_dir:"$d":"$p":count="$cnt"
+    done
+    echo LOC:first_files_dir:"$d"
+    ls -1 | head -10 | sed "s/^/LOC:file:\\"$d\\":\\"/;s/$/\\"/" || true
+  else
+    echo LOC:dir_missing:"$d"
+  fi
+done
+# Shallow recursive search under EXEC_DIR (depth<=3)
+if [ -d "${EXEC_DIR_REMOTE}" ]; then
+  for p in ${PATTERNS_GLOBS% }; do
+    echo LOC:search_under:"${EXEC_DIR_REMOTE}":pattern:"$p"
+    # Note: -name uses glob-like patterns
+	find "${EXEC_DIR_REMOTE}" -maxdepth 3 -type f -name "$p" -printf '%T@ %p\\n' 2>/dev/null | sort -nr | head -10 | cut -d' ' -f2- | sed 's/^/LOC:found: /'
+  done
+fi
+LOCEOF
+bash /tmp/__locator.sh 2>&1 || true
+rm -f /tmp/__locator.sh
+' 2>/dev/null || true)
+					if [[ -n ${LOCATOR_OUT} ]]; then
+						log_info "Locator hints BEGIN"
+						# Print only concise lines at info level; full raw is acceptable as it is short
+						printf '%s\n' "${LOCATOR_OUT}" | sed -n '1,200p' | while IFS= read -r L; do
+							[[ -n ${L} ]] && log_info "${L}"
+						done
+						log_info "Locator hints END"
+					fi
+				fi
 				# Full diagnostics only under debug to avoid excessive noise
 				if [[ ${LOG_LEVEL:-info} == debug ]]; then
 					log_debug "Transfer ${ti}: deep diagnostics BEGIN\n${REMOTE_DEEP_DIAG}\nTransfer ${ti}: deep diagnostics END"
