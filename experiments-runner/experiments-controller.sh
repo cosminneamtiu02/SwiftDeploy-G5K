@@ -444,11 +444,18 @@ else
 		DEST_DIR="${FE_COLLECTION_ROOT}/${subfolder}"
 		mkdir -p "${DEST_DIR}" || die "Failed creating destination: ${DEST_DIR}"
 		# Build remote pattern list from rule labels
+		if [[ ${LOG_LEVEL:-info} == debug ]]; then
+			log_debug "Transfer ${ti}: building pattern list from labels: ${look_for[*]}"
+		fi
 		patterns=()
 		for lbl in "${look_for[@]}"; do
 			pat="${RULE_MAP[${lbl}]:-}"
 			if [[ -n ${pat} ]]; then
 				patterns+=("${pat}")
+				if [[ ${LOG_LEVEL:-info} == debug ]]; then
+					case "${pat}" in *[*?[]*) gtype=glob ;; *) gtype=literal ;; esac
+					log_debug "Transfer ${ti}: label='${lbl}' pattern='${pat}' type=${gtype}"
+				fi
 			fi
 		done
 		if ((${#patterns[@]} == 0)); then
@@ -459,6 +466,9 @@ else
 		# intentionally do NOT double-quote the patterns when invoking the script so the remote shell
 		# expands them in the inner loop. Patterns that don't match expand to themselves unless nullglob is on;
 		# we enable nullglob so unmatched patterns vanish (prevent spurious literal pattern names).
+		if [[ ${LOG_LEVEL:-info} == debug ]]; then
+			log_debug "Transfer ${ti}: summary — node='${NODE_NAME}' dir='${look_into}' dest='${DEST_DIR}' non-recursive=true regular-files-only=true dedup=true"
+		fi
 		remote_script=$(
 			cat <<'RSCRIPT'
 set -Eeuo pipefail
@@ -492,13 +502,45 @@ RSCRIPT
 		fi
 		if [[ ${LOG_LEVEL:-info} == debug ]]; then
 			log_debug "Transfer ${ti}: remote enumeration exit code=${REMOTE_RC}; patterns tokens='${PATTERNS_GLOBS% }'"
+			# For every literal pattern, pre-check existence of that exact file (non-glob) remotely
+			for idx in "${!patterns[@]}"; do
+				p=${patterns[${idx}]}
+				if [[ ${p} != *[*?[]* ]]; then
+					LIT_EXISTS=$(ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" "bash -lc 'cd ${look_into} 2>/dev/null || exit 0; [[ -f \"${p}\" ]] && echo present || echo absent'" 2>/dev/null || true)
+					log_debug "Transfer ${ti}: literal_check pattern='${p}' -> ${LIT_EXISTS}"
+				fi
+			done
 		fi
 		IFS=$'\n' read -r -d '' -a REMOTE_FILES < <(printf '%s' "${REMOTE_RAW}" && printf '\0') || true
 		# Exit codes 3/4 mean directory missing / cd failed
 		if ((${#REMOTE_FILES[@]} == 0)); then
 			# Check if remote dir exists to refine warning
 			if ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" "test -d '${look_into}'" 2>/dev/null; then
-				log_warn "Transfer ${ti}: no files matched in ${look_into} (patterns: ${look_for[*]})"
+				log_warn "Transfer ${ti}: no files matched in ${look_into} (patterns labels: ${look_for[*]} ; raw patterns: ${patterns[*]})"
+				if [[ ${LOG_LEVEL:-info} == debug ]]; then
+					# Provide heuristic suggestions
+					for p in "${patterns[@]}"; do
+						case "${p}" in
+							*.*) ;; # has an extension or dot
+							*) log_debug "Transfer ${ti}: suggestion: pattern '${p}' has no wildcard and no extension; if you intended all .txt files, use '*.txt'" ;;
+						esac
+						if [[ ${p} == txt || ${p} == log || ${p} == out ]]; then
+							log_debug "Transfer ${ti}: suggestion: pattern '${p}' looks like an extension keyword; consider '*.${p}'"
+						fi
+						if [[ ${p} == */* ]]; then
+							log_debug "Transfer ${ti}: note: pattern '${p}' includes a slash; collector is non-recursive and will ignore nested paths unless file sits exactly in target dir"
+						fi
+						if [[ ${p} == *'*'*'*'* ]]; then
+							log_debug "Transfer ${ti}: note: pattern '${p}' contains multiple consecutive *; verify you intended that"
+						fi
+						if [[ ${p} == .* ]]; then
+							log_debug "Transfer ${ti}: note: hidden file pattern '${p}' used; ensure producing process creates dotfiles if expected"
+						fi
+						if [[ ${p} != *[*?[]* ]]; then
+							log_debug "Transfer ${ti}: classification: '${p}' treated as literal (no wildcards)"
+						fi
+					done
+				fi
 				# Extra debug: list directory snapshot and per-pattern simulated expansion
 				if [[ ${LOG_LEVEL:-info} == debug ]]; then
 					log_debug "Transfer ${ti}: directory exists. Gathering debug listing (login=user:root)..."
@@ -507,7 +549,7 @@ RSCRIPT
 					log_debug "Transfer ${ti}: directory file count=${REMOTE_COUNT:-0}"
 					log_debug "Transfer ${ti}: first directory entries (up to 200):\n${REMOTE_LISTING:-<empty>}"
 					# Unified deep diagnostics via remote heredoc script (avoid unbound vars under set -u)
-					REMOTE_DEEP_DIAG=$(ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" bash -lc $'cat > /tmp/__deep_diag.sh <<"DIAGEOF"
+					REMOTE_DEEP_DIAG=$(ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" PATTERNS_GLOBS="${PATTERNS_GLOBS% }" bash -lc $'cat > /tmp/__deep_diag.sh <<"DIAGEOF"
 set +u
 set -o pipefail
 shopt -s nullglob
@@ -556,6 +598,21 @@ bash /tmp/__deep_diag.sh 2>&1 || true
 rm -f /tmp/__deep_diag.sh
 ' 2>/dev/null || true)
 					log_debug "Transfer ${ti}: deep diagnostics BEGIN\n${REMOTE_DEEP_DIAG}\nTransfer ${ti}: deep diagnostics END"
+					# Classify reason for zero-match using diagnostics
+					if [[ -n ${REMOTE_DEEP_DIAG} ]]; then
+						match_count=$(printf '%s\n' "${REMOTE_DEEP_DIAG}" | grep -c '^DIAG:match:' || true)
+						plain_count=$(printf '%s\n' "${REMOTE_DEEP_DIAG}" | sed -n 's/^DIAG:plain_file_count="\([0-9]\+\)".*/\1/p' | head -1)
+						plain_count=${plain_count:-0}
+						if [[ ${REMOTE_COUNT:-0} -eq 0 ]]; then
+							log_debug "Transfer ${ti}: classification=dir_empty (no entries in directory)."
+						elif [[ ${plain_count} -eq 0 && ${REMOTE_COUNT:-0} -gt 0 ]]; then
+							log_debug "Transfer ${ti}: classification=only_directories (no regular files present)."
+						elif [[ ${match_count} -eq 0 && ${plain_count} -gt 0 ]]; then
+							log_debug "Transfer ${ti}: classification=patterns_mismatch (regular files exist but none matched)."
+						else
+							log_debug "Transfer ${ti}: classification=unknown (needs manual inspection of DIAG block)."
+						fi
+					fi
 					log_debug "Transfer ${ti}: raw remote enumeration produced zero lines; either no plain files matched or only directories existed."
 				fi
 			else
@@ -564,9 +621,39 @@ rm -f /tmp/__deep_diag.sh
 			continue
 		fi
 		log_info "Transfer ${ti}: ${#REMOTE_FILES[@]} unique files from ${look_into} -> ${DEST_DIR} (patterns: ${look_for[*]})"
+		# Post-match reasoning: for each matched file, show which patterns it matches (local bash pattern match)
+		if [[ ${LOG_LEVEL:-info} == debug ]]; then
+			max_show=$((${#REMOTE_FILES[@]} < 50 ? ${#REMOTE_FILES[@]} : 50))
+			for ((mi = 0; mi < max_show; mi++)); do
+				fname=${REMOTE_FILES[${mi}]}
+				matched_list=()
+				for p in "${patterns[@]}"; do
+					# shellcheck disable=SC2053 # we intentionally use pattern matching
+					if [[ ${fname} == ${p} ]]; then
+						matched_list+=("${p}")
+					fi
+				done
+				if ((${#matched_list[@]} > 0)); then
+					log_debug "REASON: file '${fname}' selected because it matched patterns: ${matched_list[*]}"
+				else
+					log_debug "REASON: file '${fname}' selected by remote script but did not match any local pattern check (possible mismatch in shell options)."
+				fi
+			done
+		fi
 		if [[ ${LOG_LEVEL:-info} == debug ]]; then
 			printf '%s\n' "${REMOTE_FILES[@]:0:20}" | sed 's/^/DEBUG first-matches: /' || true
 			((${#REMOTE_FILES[@]} > 20)) && log_debug "(only first 20 names logged)"
+			# Provide origin reasoning (which patterns contributed to each file)
+			for mf in "${REMOTE_FILES[@]}"; do
+				orig_patterns=()
+				for p in "${patterns[@]}"; do
+					# shellcheck disable=SC2016,SC2154
+					if ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" "bash -lc 'cd ${look_into} 2>/dev/null || exit 0; shopt -s nullglob; for __t in ${p}; do [ \"${__t}\" = \"${mf}\" ] && exit 0; done; exit 1'" 2>/dev/null; then
+						orig_patterns+=("${p}")
+					fi
+				done
+				log_debug "Transfer ${ti}: match_reason file='${mf}' from_patterns='${orig_patterns[*]:-<unknown>}'"
+			done
 		fi
 		copied=0 failed=0
 		for f in "${REMOTE_FILES[@]}"; do
