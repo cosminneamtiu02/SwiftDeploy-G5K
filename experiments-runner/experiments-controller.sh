@@ -483,7 +483,7 @@ entries_total=$(find . -maxdepth 1 -mindepth 1 -printf . 2>/dev/null | wc -c | t
 reg_total=$(find . -maxdepth 1 -mindepth 1 -type f -printf . 2>/dev/null | wc -c | tr -d "[:space:]")
 echo PRE:entries_total="$entries_total"
 echo PRE:regular_total="$reg_total"
-find . -maxdepth 1 -mindepth 1 -printf 'PRE:list:%f\\n' 2>/dev/null || true
+find . -maxdepth 1 -mindepth 1 -print 2>/dev/null | sed -e 's#^\./##' -e 's#^#PRE:list:#' || true
 # Per-pattern matches
 for p in ${PATTERNS_GLOBS% }; do
   echo PREPAT:pattern:"$p"
