@@ -477,6 +477,10 @@ else
 set +u
 set -o pipefail
 shopt -s nullglob
+# Ensure we operate in the configured directory
+dir="${LOOK_INTO_REMOTE:-}"
+if [ -z "$dir" ]; then echo PRE:missing=1; exit 0; fi
+cd "$dir" 2>/dev/null || { echo PRE:missing=1; exit 0; }
 # Print counts and list entries in current dir
 echo PRE:pwd="$PWD"
 entries_total=$(find . -maxdepth 1 -mindepth 1 -printf . 2>/dev/null | wc -c | tr -d "[:space:]")
@@ -498,7 +502,6 @@ for p in ${PATTERNS_GLOBS% }; do
   fi
 done
 PREEOF
-cd "${LOOK_INTO_REMOTE}" 2>/dev/null || { echo PRE:missing=1; exit 0; }
 bash /tmp/__prescan.sh 2>/dev/null || true
 rm -f /tmp/__prescan.sh
 ' 2>/dev/null || true)
@@ -510,6 +513,9 @@ rm -f /tmp/__prescan.sh
 				# Show the exact directory being scanned on the node
 				SRC_PWD=$(printf '%s\n' "${REMOTE_PRESCAN}" | sed -n 's/^PRE:pwd=\(.*\)$/\1/p' | head -1)
 				[[ -n ${SRC_PWD} ]] && log_info "Transfer ${ti} source prescan dir: ${SRC_PWD}"
+				if [[ -n ${SRC_PWD} && ${SRC_PWD} != "${look_into}" ]]; then
+					die "Transfer ${ti} misconfiguration: prescan ran in '${SRC_PWD}', expected '${look_into}'."
+				fi
 				SRC_ENTRIES=$(printf '%s\n' "${REMOTE_PRESCAN}" | sed -n 's/^PRE:entries_total="\([0-9]\+\)".*/\1/p' | head -1)
 				SRC_REGULAR=$(printf '%s\n' "${REMOTE_PRESCAN}" | sed -n 's/^PRE:regular_total="\([0-9]\+\)".*/\1/p' | head -1)
 				log_info "Transfer ${ti} source prescan: entries=${SRC_ENTRIES:-0}, regular_files=${SRC_REGULAR:-0}"
@@ -614,6 +620,10 @@ RSCRIPT
 set +u
 set -o pipefail
 shopt -s nullglob
+# Change into configured directory first
+dir="${LOOK_INTO_REMOTE:-}"
+if [ -z "$dir" ]; then echo DIAG:missing=1; exit 0; fi
+cd "$dir" 2>/dev/null || { echo DIAG:missing=1; exit 0; }
 echo DIAG:pwd="${PWD}"
 echo DIAG:whoami="$(whoami)"
 echo DIAG:shellopts="$-"
@@ -659,12 +669,13 @@ shopt -p nullglob
 echo DIAG:env_HOME="$HOME"
 echo DIAG:env_USER="$USER"
 DIAGEOF
-cd "${LOOK_INTO_REMOTE}" 2>/dev/null || true
 bash /tmp/__deep_diag.sh 2>&1 || true
 rm -f /tmp/__deep_diag.sh
 ' 2>/dev/null || true)
 				# Parse and log a concise summary at info level
 				if [[ -n ${REMOTE_DEEP_DIAG} ]]; then
+					DIAG_PWD=$(printf '%s\n' "${REMOTE_DEEP_DIAG}" | sed -n 's/^DIAG:pwd="\(.*\)"/\1/p' | head -1)
+					[[ -n ${DIAG_PWD} ]] && log_info "Transfer ${ti} diagnostics dir: ${DIAG_PWD}"
 					ENTRIES_COUNT=$(printf '%s\n' "${REMOTE_DEEP_DIAG}" | sed -n 's/^DIAG:entries_count="\([0-9]\+\)".*/\1/p' | head -1)
 					PLAIN_COUNT=$(printf '%s\n' "${REMOTE_DEEP_DIAG}" | sed -n 's/^DIAG:plain_file_count="\([0-9]\+\)".*/\1/p' | head -1)
 					NULLGLOB_STATE=$(printf '%s\n' "${REMOTE_DEEP_DIAG}" | sed -n 's/^shopt -\([su]\) nullglob$/\1/p' | head -1)
