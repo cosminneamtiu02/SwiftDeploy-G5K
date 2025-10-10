@@ -473,7 +473,7 @@ else
 		fi
 		# Remote pre-scan: show how many entries and regular files exist and list all entries; also show per-pattern matches
 		PATTERNS_GLOBS_PRE=$(printf '%s ' "${patterns[@]}")
-		REMOTE_PRESCAN=$(ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" PATTERNS_GLOBS="${PATTERNS_GLOBS_PRE% }" bash -lc $'cat > /tmp/__prescan.sh <<"PREEOF"
+		REMOTE_PRESCAN=$(ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" LOOK_INTO_REMOTE="${look_into}" PATTERNS_GLOBS="${PATTERNS_GLOBS_PRE% }" bash -lc $'cat > /tmp/__prescan.sh <<"PREEOF"
 set +u
 set -o pipefail
 shopt -s nullglob
@@ -498,7 +498,7 @@ for p in ${PATTERNS_GLOBS% }; do
   fi
 done
 PREEOF
-cd "${look_into}" 2>/dev/null || { echo PRE:missing=1; exit 0; }
+cd "${LOOK_INTO_REMOTE}" 2>/dev/null || { echo PRE:missing=1; exit 0; }
 bash /tmp/__prescan.sh 2>/dev/null || true
 rm -f /tmp/__prescan.sh
 ' 2>/dev/null || true)
@@ -607,7 +607,7 @@ RSCRIPT
 					log_info "Transfer ${ti} FE destination per-pattern matches: ${DEST_PER_PATTERN[*]}"
 				fi
 				# Always gather a concise diagnostic summary to explain the zero-match
-				REMOTE_DEEP_DIAG=$(ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" PATTERNS_GLOBS="${PATTERNS_GLOBS% }" bash -lc $'cat > /tmp/__deep_diag.sh <<"DIAGEOF"
+				REMOTE_DEEP_DIAG=$(ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" LOOK_INTO_REMOTE="${look_into}" PATTERNS_GLOBS="${PATTERNS_GLOBS% }" bash -lc $'cat > /tmp/__deep_diag.sh <<"DIAGEOF"
 set +u
 set -o pipefail
 shopt -s nullglob
@@ -656,7 +656,7 @@ shopt -p nullglob
 echo DIAG:env_HOME="$HOME"
 echo DIAG:env_USER="$USER"
 DIAGEOF
-cd "${look_into}" 2>/dev/null || true
+cd "${LOOK_INTO_REMOTE}" 2>/dev/null || true
 bash /tmp/__deep_diag.sh 2>&1 || true
 rm -f /tmp/__deep_diag.sh
 ' 2>/dev/null || true)
