@@ -505,7 +505,7 @@ rm -f /tmp/__prescan.sh
 		# Log concise prescan summary and details
 		if [[ -n ${REMOTE_PRESCAN} ]]; then
 			if printf '%s\n' "${REMOTE_PRESCAN}" | grep -q '^PRE:missing=1'; then
-				log_info "Transfer ${ti} source prescan: directory missing: ${look_into}"
+				die "Transfer ${ti} configuration error: source directory does not exist on node: ${look_into}"
 			else
 				SRC_ENTRIES=$(printf '%s\n' "${REMOTE_PRESCAN}" | sed -n 's/^PRE:entries_total="\([0-9]\+\)".*/\1/p' | head -1)
 				SRC_REGULAR=$(printf '%s\n' "${REMOTE_PRESCAN}" | sed -n 's/^PRE:regular_total="\([0-9]\+\)".*/\1/p' | head -1)
@@ -573,7 +573,7 @@ RSCRIPT
 		IFS=$'\n' read -r -d '' -a REMOTE_FILES < <(printf '%s' "${REMOTE_RAW}" && printf '\0') || true
 		# Exit codes 3/4 mean directory missing / cd failed
 		if ((${#REMOTE_FILES[@]} == 0)); then
-			# Check if remote dir exists to refine warning
+			# Check if remote dir exists to refine behavior
 			if ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" "test -d '${look_into}'" 2>/dev/null; then
 				log_warn "Transfer ${ti}: no files matched in ${look_into} (patterns labels: ${look_for[*]} ; raw patterns: ${patterns[*]})"
 				# FE destination summary: what is currently there, and how patterns compare locally
@@ -770,7 +770,7 @@ rm -f /tmp/__locator.sh
 					log_debug "Transfer ${ti}: deep diagnostics BEGIN\n${REMOTE_DEEP_DIAG}\nTransfer ${ti}: deep diagnostics END"
 				fi
 			else
-				log_warn "Transfer ${ti}: directory ${look_into} does not exist"
+				die "Transfer ${ti} configuration error: directory does not exist on node: ${look_into}"
 			fi
 			continue
 		fi
