@@ -507,6 +507,9 @@ rm -f /tmp/__prescan.sh
 			if printf '%s\n' "${REMOTE_PRESCAN}" | grep -q '^PRE:missing=1'; then
 				die "Transfer ${ti} configuration error: source directory does not exist on node: ${look_into}"
 			else
+				# Show the exact directory being scanned on the node
+				SRC_PWD=$(printf '%s\n' "${REMOTE_PRESCAN}" | sed -n 's/^PRE:pwd=\(.*\)$/\1/p' | head -1)
+				[[ -n ${SRC_PWD} ]] && log_info "Transfer ${ti} source prescan dir: ${SRC_PWD}"
 				SRC_ENTRIES=$(printf '%s\n' "${REMOTE_PRESCAN}" | sed -n 's/^PRE:entries_total="\([0-9]\+\)".*/\1/p' | head -1)
 				SRC_REGULAR=$(printf '%s\n' "${REMOTE_PRESCAN}" | sed -n 's/^PRE:regular_total="\([0-9]\+\)".*/\1/p' | head -1)
 				log_info "Transfer ${ti} source prescan: entries=${SRC_ENTRIES:-0}, regular_files=${SRC_REGULAR:-0}"
@@ -531,7 +534,7 @@ rm -f /tmp/__prescan.sh
 		remote_script=$(
 			cat <<'RSCRIPT'
 set -Eeuo pipefail
-dir="$1"; shift || true
+dir="${DIR_REMOTE:-}"
 if [[ ! -d "$dir" ]]; then exit 3; fi
 cd "$dir" || exit 4
 shopt -s nullglob
@@ -553,7 +556,7 @@ RSCRIPT
 		)
 		PATTERNS_GLOBS=$(printf '%s ' "${patterns[@]}")
 		# Capture raw output (even if empty) for debug analysis, also capture exit status
-		REMOTE_RAW=$(ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" "PATTERNS_GLOBS=${PATTERNS_GLOBS% } bash -lc $'${remote_script//$'\n'/\n}' '${look_into}'; printf '__RC__:%s' $?" 2>/dev/null || true)
+		REMOTE_RAW=$(ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" "DIR_REMOTE=${look_into} PATTERNS_GLOBS=${PATTERNS_GLOBS% } bash -lc $'${remote_script//$'\n'/\n}'; printf '__RC__:%s' $?" 2>/dev/null || true)
 		REMOTE_RC=0
 		if [[ ${REMOTE_RAW} == *'__RC__:'* ]]; then
 			REMOTE_RC=${REMOTE_RAW##*__RC__:}
