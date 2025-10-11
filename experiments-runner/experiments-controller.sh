@@ -435,6 +435,8 @@ else
 
 	for ((ti = 0; ti < transf_count; ti++)); do
 		look_into=$(jq -r ".[${ti}].look_into" <<<"${COLLECT_FTRANSFERS_JSON}")
+		# Sanitize: drop trailing CR/whitespace to avoid invisible path issues
+		look_into=$(printf '%s' "${look_into}" | tr -d '\r' | sed 's/[[:space:]]\+$//')
 		subfolder=$(jq -r ".[${ti}].transfer_to_subfolder_of_base_path" <<<"${COLLECT_FTRANSFERS_JSON}")
 		mapfile -t look_for < <(jq -r ".[${ti}].look_for[]" <<<"${COLLECT_FTRANSFERS_JSON}" || true)
 		if [[ -z ${look_into} || -z ${subfolder} ]]; then
@@ -473,13 +475,17 @@ else
 		fi
 		# Remote pre-scan: show how many entries and regular files exist and list all entries; also show per-pattern matches
 		PATTERNS_GLOBS_PRE=$(printf '%s ' "${patterns[@]}")
-		REMOTE_PRESCAN=$(ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" LOOK_INTO_REMOTE="${look_into}" PATTERNS_GLOBS="${PATTERNS_GLOBS_PRE% }" bash -lc $'cat > /tmp/__prescan.sh <<"PREEOF"
+		REMOTE_PRESCAN=$(ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" LOOK_INTO_REMOTE="${look_into}" DIR_FALLBACK="${look_into}" PATTERNS_GLOBS="${PATTERNS_GLOBS_PRE% }" bash -lc $'cat > /tmp/__prescan.sh <<"PREEOF"
 set +u
 set -o pipefail
 shopt -s nullglob
 # Ensure we operate in the configured directory
-dir="${LOOK_INTO_REMOTE:-}"
+dir="${LOOK_INTO_REMOTE:-${DIR_FALLBACK:-}}"
 if [ -z "$dir" ]; then echo PRE:missing=1; exit 0; fi
+# Inline diagnostics
+echo PRE:host="$(hostname)"
+echo PRE:dir_var="$dir"
+ls -ld -- "$dir" 2>/dev/null | sed "s/^/PRE:dir_stat: /" || echo PRE:dir_stat:ls_failed
 cd "$dir" 2>/dev/null || { echo PRE:missing=1; exit 0; }
 # Print counts and list entries in current dir
 echo PRE:pwd="$PWD"
@@ -487,7 +493,7 @@ entries_total=$(find . -maxdepth 1 -mindepth 1 -printf . 2>/dev/null | wc -c | t
 reg_total=$(find . -maxdepth 1 -mindepth 1 -type f -printf . 2>/dev/null | wc -c | tr -d "[:space:]")
 echo PRE:entries_total="$entries_total"
 echo PRE:regular_total="$reg_total"
-find . -maxdepth 1 -mindepth 1 -print 2>/dev/null | sed -e 's#^\./##' -e 's#^#PRE:list:#' || true
+find . -maxdepth 1 -mindepth 1 -print 2>/dev/null | sed -e "s#^\./##" -e "s#^#PRE:list:#" || true
 # Per-pattern matches
 for p in ${PATTERNS_GLOBS% }; do
   echo PREPAT:pattern:"$p"
@@ -507,6 +513,13 @@ rm -f /tmp/__prescan.sh
 ' 2>/dev/null || true)
 		# Log concise prescan summary and details
 		if [[ -n ${REMOTE_PRESCAN} ]]; then
+			# If missing reported, enrich with debugging: show node hostname, env var, and a direct ls -ld probe
+			if printf '%s\n' "${REMOTE_PRESCAN}" | grep -q '^PRE:missing=1'; then
+				HOSTNAME_NODE=$(ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" 'hostname' 2>/dev/null || true)
+				LOOK_INTO_ECHO=$(ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" "printf '%s' '${look_into}'" 2>/dev/null || true)
+				STAT_LINE=$(ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" "ls -ld -- '${look_into}' 2>/dev/null || echo 'ls_failed'" 2>/dev/null || true)
+				log_info "Transfer ${ti} debug: node='${HOSTNAME_NODE:-?}', look_into='${LOOK_INTO_ECHO}', ls='${STAT_LINE}'"
+			fi
 			if printf '%s\n' "${REMOTE_PRESCAN}" | grep -q '^PRE:missing=1'; then
 				die "Transfer ${ti} configuration error: source directory does not exist on node: ${look_into}"
 			else
@@ -616,13 +629,16 @@ RSCRIPT
 					log_info "Transfer ${ti} FE destination per-pattern matches: ${DEST_PER_PATTERN[*]}"
 				fi
 				# Always gather a concise diagnostic summary to explain the zero-match
-				REMOTE_DEEP_DIAG=$(ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" LOOK_INTO_REMOTE="${look_into}" PATTERNS_GLOBS="${PATTERNS_GLOBS% }" bash -lc $'cat > /tmp/__deep_diag.sh <<"DIAGEOF"
+				REMOTE_DEEP_DIAG=$(ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" LOOK_INTO_REMOTE="${look_into}" DIR_FALLBACK="${look_into}" PATTERNS_GLOBS="${PATTERNS_GLOBS% }" bash -lc $'cat > /tmp/__deep_diag.sh <<"DIAGEOF"
 set +u
 set -o pipefail
 shopt -s nullglob
 # Change into configured directory first
-dir="${LOOK_INTO_REMOTE:-}"
+dir="${LOOK_INTO_REMOTE:-${DIR_FALLBACK:-}}"
 if [ -z "$dir" ]; then echo DIAG:missing=1; exit 0; fi
+echo DIAG:host="$(hostname)"
+echo DIAG:dir_var="$dir"
+ls -ld -- "$dir" 2>/dev/null | sed "s/^/DIAG:dir_stat: /" || echo DIAG:dir_stat:ls_failed
 cd "$dir" 2>/dev/null || { echo DIAG:missing=1; exit 0; }
 echo DIAG:pwd="${PWD}"
 echo DIAG:whoami="$(whoami)"
