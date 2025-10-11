@@ -14,6 +14,24 @@ CONFIGS_DIR_IMPL="${CONFIGS_DIR_PRIMARY}/implementations"
 CURRENT_NODE_FILE="${RUNNER_ROOT}/current_node.txt"
 ALT_NODE_FILE="${REPO_ROOT}/current_node.txt"
 
+# Source logging and common helpers (provides log_*, die, require_cmd, etc.)
+if [[ -f "${BIN_DIR}/utils/liblog.sh" ]]; then
+	# shellcheck disable=SC1091
+	source "${BIN_DIR}/utils/liblog.sh"
+fi
+if [[ -f "${BIN_DIR}/utils/common.sh" ]]; then
+	# shellcheck disable=SC1091
+	source "${BIN_DIR}/utils/common.sh"
+fi
+
+# Logs directory for this controller run (flat, stable path)
+LOG_DIR="${LOGS_DIR_BASE}"
+mkdir -p "${LOG_DIR}" 2>/dev/null || true
+
+# Minimal trap handlers to avoid undefined references
+__cleanup() { :; }
+__on_err() { log_error "Unexpected error in experiments-controller"; }
+
 # FE-side tracking (done.txt) variables
 SELECTED_BATCH=""
 
@@ -39,6 +57,13 @@ while [[ $# -gt 0 ]]; do
 	esac
 done
 
+# Map --verbose to LOG_LEVEL for liblog
+if [[ ${VERBOSE} == true ]]; then
+	export LOG_LEVEL=debug
+else
+	export LOG_LEVEL=${LOG_LEVEL:-info}
+fi
+
 if [[ -z ${CONFIG_NAME} ]]; then
 	echo "ERROR: --config <config.json> is required" >&2
 	exit 1
@@ -57,51 +82,6 @@ if [[ -z ${CONFIG_PATH} ]]; then
 	exit 1
 fi
 
-# --- Logging ---
-timestamp() { date +"%Y-%m-%d_%H-%M-%S"; }
-LOG_DIR="${LOGS_DIR_BASE}/$(timestamp)"
-mkdir -p "${LOG_DIR}"
-
-# shellcheck source=/dev/null
-LOG_FILE="${LOG_DIR}/controller.log"
-export LOG_FILE
-# shellcheck disable=SC1091
-source "${RUNNER_ROOT}/bin/utils/liblog.sh"
-log_info "Controller started. Logs: ${LOG_FILE}"
-
-# Backward-compat: if plain 'log' isn't defined by the logging lib, map it to info
-if ! declare -F log >/dev/null 2>&1; then
-	log() { log_info "$@"; }
-fi
-
-require_cmd() { command -v "$1" >/dev/null 2>&1 || die "Missing required command: $1"; }
-
-# --- Optional verbose mode (debug-level logs, no shell tracing noise) ---
-if ${VERBOSE}; then
-	export LOG_LEVEL=debug
-fi
-
-# --- Error trap for clearer failures ---
-__on_err() {
-	local exit_code=$?
-	local line_no=${BASH_LINENO[0]:-?}
-	local src_file=${BASH_SOURCE[1]:-$(basename "$0")}
-	local last_cmd=${BASH_COMMAND:-unknown}
-	log_error "Failure (exit=${exit_code}) at ${src_file}:${line_no} while running: ${last_cmd}"
-	log_error "See ${LOG_FILE} for details."
-}
-trap __on_err ERR
-
-# Ensure background streams are cleaned up on exit
-__cleanup() {
-	if [[ -n ${STREAM_PID:-} ]]; then
-		kill "${STREAM_PID}" >/dev/null 2>&1 || true
-		wait "${STREAM_PID}" >/dev/null 2>&1 || true
-	fi
-}
-trap __cleanup EXIT
-
-# --- Dependencies ---
 require_cmd jq
 require_cmd base64
 
@@ -475,12 +455,12 @@ else
 		fi
 		# Remote pre-scan: show how many entries and regular files exist and list all entries; also show per-pattern matches
 		PATTERNS_GLOBS_PRE=$(printf '%s ' "${patterns[@]}")
-		REMOTE_PRESCAN=$(ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" LOOK_INTO_REMOTE="${look_into}" DIR_FALLBACK="${look_into}" PATTERNS_GLOBS="${PATTERNS_GLOBS_PRE% }" bash -lc $'cat > /tmp/__prescan.sh <<"PREEOF"
+		REMOTE_PRESCAN=$(ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" LOOK_INTO_REMOTE="${look_into}" PATTERNS_GLOBS="${PATTERNS_GLOBS_PRE% }" bash -lc $'cat > /tmp/__prescan.sh <<"PREEOF"
 set +u
 set -o pipefail
 shopt -s nullglob
 # Ensure we operate in the configured directory
-dir="${LOOK_INTO_REMOTE:-${DIR_FALLBACK:-}}"
+dir="${LOOK_INTO_REMOTE:-}"
 if [ -z "$dir" ]; then echo PRE:missing=1; exit 0; fi
 # Inline diagnostics
 echo PRE:host="$(hostname)"
@@ -561,6 +541,7 @@ rm -f /tmp/__prescan.sh
 		remote_script=$(
 			cat <<'RSCRIPT'
 set -Eeuo pipefail
+# Directory provided through env
 dir="${DIR_REMOTE:-}"
 if [[ ! -d "$dir" ]]; then exit 3; fi
 cd "$dir" || exit 4
@@ -637,12 +618,12 @@ RSCRIPT
 					log_info "Transfer ${ti} FE destination per-pattern matches: ${DEST_PER_PATTERN[*]}"
 				fi
 				# Always gather a concise diagnostic summary to explain the zero-match
-				REMOTE_DEEP_DIAG=$(ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" LOOK_INTO_REMOTE="${look_into}" DIR_FALLBACK="${look_into}" PATTERNS_GLOBS="${PATTERNS_GLOBS% }" bash -lc $'cat > /tmp/__deep_diag.sh <<"DIAGEOF"
+				REMOTE_DEEP_DIAG=$(ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" LOOK_INTO_REMOTE="${look_into}" PATTERNS_GLOBS="${PATTERNS_GLOBS% }" bash -lc $'cat > /tmp/__deep_diag.sh <<"DIAGEOF"
 set +u
 set -o pipefail
 shopt -s nullglob
 # Change into configured directory first
-dir="${LOOK_INTO_REMOTE:-${DIR_FALLBACK:-}}"
+dir="${LOOK_INTO_REMOTE:-}"
 if [ -z "$dir" ]; then echo DIAG:missing=1; exit 0; fi
 echo DIAG:host="$(hostname)"
 echo DIAG:dir_var="$dir"

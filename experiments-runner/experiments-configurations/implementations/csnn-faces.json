@@ -15,7 +15,7 @@
       ],
       "ftransfers": [
         {
-          "look_into": "/root/csnn-build/result",
+          "look_into": "/root/csnn-build/results",
           "look_for": ["txt"],
           "transfer_to_subfolder_of_base_path": "results"
         }
