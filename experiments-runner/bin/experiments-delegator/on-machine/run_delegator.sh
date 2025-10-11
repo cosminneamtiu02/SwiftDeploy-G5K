@@ -180,14 +180,7 @@ else
 	fi
 fi
 
-log "Batch completed. Starting collection if configured."
-STRAT=$(jq -r '.running_experiments.experiments_collection.collection_strategy // empty' "${CONFIG_JSON_PATH}")
-if [[ -n ${STRAT} && -x "${BASE_DIR}/on-machine/${STRAT}" ]]; then
-	"${BASE_DIR}/on-machine/${STRAT}" "${CONFIG_JSON_PATH}" | tee -a "${LOGS_DIR}/collector.log"
-else
-	log "No collection strategy configured or not found. Skipping."
-fi
-
+log "Batch completed."
 log "Delegator done."
 
 # Mark success so EXIT trap does not revert

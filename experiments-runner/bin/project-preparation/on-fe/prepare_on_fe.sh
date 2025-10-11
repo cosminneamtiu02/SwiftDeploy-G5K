@@ -98,7 +98,6 @@ if ssh -o BatchMode=yes -o StrictHostKeyChecking=no "root@${NODE_NAME}" 'echo ok
 	# Use tar-over-ssh to avoid scp quirks with trailing dots and to preserve perms
 	transfer_dir_via_tar "${RUNNER_ROOT}/bin/project-preparation/on-machine" "${NODE_NAME}" "${REMOTE_ON_MACHINE_DIR}"
 	transfer_dir_via_tar "${RUNNER_ROOT}/bin/experiments-delegator/on-machine" "${NODE_NAME}" "${REMOTE_ON_MACHINE_DIR}"
-	transfer_dir_via_tar "${RUNNER_ROOT}/bin/experiments-collector/on-machine" "${NODE_NAME}" "${REMOTE_ON_MACHINE_DIR}"
 else
 	log_warn "SSH not ready on ${NODE_NAME}. Skipping script upload."
 fi

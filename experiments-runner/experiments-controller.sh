@@ -513,21 +513,29 @@ rm -f /tmp/__prescan.sh
 ' 2>/dev/null || true)
 		# Log concise prescan summary and details
 		if [[ -n ${REMOTE_PRESCAN} ]]; then
-			# If missing reported, enrich with debugging: show node hostname, env var, and a direct ls -ld probe
+			PRESCAN_REPORTED_MISSING=false
 			if printf '%s\n' "${REMOTE_PRESCAN}" | grep -q '^PRE:missing=1'; then
+				PRESCAN_REPORTED_MISSING=true
+				# Enrich with debugging: show node hostname, env var, and a direct ls -ld probe
 				HOSTNAME_NODE=$(ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" 'hostname' 2>/dev/null || true)
 				LOOK_INTO_ECHO=$(ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" "printf '%s' '${look_into}'" 2>/dev/null || true)
 				STAT_LINE=$(ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" "ls -ld -- '${look_into}' 2>/dev/null || echo 'ls_failed'" 2>/dev/null || true)
 				log_info "Transfer ${ti} debug: node='${HOSTNAME_NODE:-?}', look_into='${LOOK_INTO_ECHO}', ls='${STAT_LINE}'"
+				if [[ ${STAT_LINE} == ls_failed* ]]; then
+					# Both prescan and direct ls indicate missing → fatal
+					die "Transfer ${ti} configuration error: source directory does not exist on node: ${look_into}"
+				else
+					# Directory exists; continue instead of failing due to possible prescan subshell/env quirk
+					log_warn "Transfer ${ti}: prescan reported missing but direct ls confirms directory exists; continuing with enumeration guarded by explicit cd."
+				fi
 			fi
-			if printf '%s\n' "${REMOTE_PRESCAN}" | grep -q '^PRE:missing=1'; then
-				die "Transfer ${ti} configuration error: source directory does not exist on node: ${look_into}"
-			else
+			# If prescan produced details (i.e., not missing), log concise summary
+			if [[ ${PRESCAN_REPORTED_MISSING} == false ]]; then
 				# Show the exact directory being scanned on the node
 				SRC_PWD=$(printf '%s\n' "${REMOTE_PRESCAN}" | sed -n 's/^PRE:pwd=\(.*\)$/\1/p' | head -1)
 				[[ -n ${SRC_PWD} ]] && log_info "Transfer ${ti} source prescan dir: ${SRC_PWD}"
 				if [[ -n ${SRC_PWD} && ${SRC_PWD} != "${look_into}" ]]; then
-					die "Transfer ${ti} misconfiguration: prescan ran in '${SRC_PWD}', expected '${look_into}'."
+					log_warn "Transfer ${ti}: prescan reported PWD='${SRC_PWD}' but expected '${look_into}'. Continuing with enumeration guarded by explicit cd."
 				fi
 				SRC_ENTRIES=$(printf '%s\n' "${REMOTE_PRESCAN}" | sed -n 's/^PRE:entries_total="\([0-9]\+\)".*/\1/p' | head -1)
 				SRC_REGULAR=$(printf '%s\n' "${REMOTE_PRESCAN}" | sed -n 's/^PRE:regular_total="\([0-9]\+\)".*/\1/p' | head -1)
