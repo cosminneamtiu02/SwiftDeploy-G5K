@@ -432,6 +432,8 @@ else
 		patterns=()
 		for lbl in "${look_for[@]}"; do
 			pat="${RULE_MAP[${lbl}]:-}"
+			# Sanitize patterns: strip CRs and trailing whitespace to avoid invisible mismatches
+			pat=$(printf '%s' "${pat}" | tr -d '\r' | sed 's/[[:space:]]\+$//')
 			if [[ -n ${pat} ]]; then
 				patterns+=("${pat}")
 				if [[ ${LOG_LEVEL:-info} == debug ]]; then
@@ -564,13 +566,13 @@ declare -A seen=()
 for pat in "${_raw[@]}"; do
 	# Expand pattern by iterating over matched filenames (nullglob removes unmatched)
 	# Use an indirection loop that tolerates set -u by localizing rf
-	for rf in $pat; do
+	while IFS= read -r rf; do
 		[[ -f "$rf" ]] || continue
 		if [[ -z ${seen[$rf]+x} ]]; then
 			printf '%s\n' "$rf"
 			seen[$rf]=1
 		fi
-	done
+	done < <(compgen -G "$pat" 2>/dev/null || true)
 done
 RSCRIPT
 		)
@@ -608,16 +610,7 @@ RSCRIPT
 		IFS=$'\n' read -r -d '' -a REMOTE_FILES < <(printf '%s' "${REMOTE_RAW}" && printf '\0') || true
 		# Exit codes 3/4 mean directory missing / cd failed
 		if ((${#REMOTE_FILES[@]} == 0)); then
-			# One-shot retry after a short delay in case writers flush right after delegation
-			log_info "Transfer ${ti}: no matches on first pass; retrying enumeration after 2s..."
-			sleep 2
-			REMOTE_RAW=$(ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" "DIR_REMOTE=${look_into} PATTERNS_GLOBS=${PATTERNS_GLOBS% } bash -lc $'${remote_script//$'\n'/\n}'; printf '__RC__:%s' $?" 2>/dev/null || true)
-			REMOTE_RC=0
-			if [[ ${REMOTE_RAW} == *'__RC__:'* ]]; then
-				REMOTE_RC=${REMOTE_RAW##*__RC__:}
-				REMOTE_RAW=${REMOTE_RAW%__RC__:*}
-			fi
-			IFS=$'\n' read -r -d '' -a REMOTE_FILES < <(printf '%s' "${REMOTE_RAW}" && printf '\0') || true
+			# No retry per user request; proceed to diagnostics
 			# Check if remote dir exists to refine behavior
 			if ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" "test -d '${look_into}'" 2>/dev/null; then
 				log_warn "Transfer ${ti}: no files matched in ${look_into} (patterns labels: ${look_for[*]} ; raw patterns: ${patterns[*]})"
@@ -691,7 +684,8 @@ for p in ${PATTERNS_GLOBS% }; do
 	case "$p" in *[*?[]* ) is_glob=yes;; esac
 	echo DIAG:pattern_header:"$p":glob="$is_glob"
 	count=0
-	for rf in $p; do
+	# Use compgen for robust globbing consistent with enumeration
+	for rf in $(compgen -G "$p" 2>/dev/null); do
 		[ -f "$rf" ] || continue
 		count=$((count+1))
 		sz=$(wc -c <"$rf" 2>/dev/null || echo 0)
