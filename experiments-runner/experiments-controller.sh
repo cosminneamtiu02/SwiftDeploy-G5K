@@ -419,7 +419,8 @@ else
 		look_into=$(printf '%s' "${look_into}" | tr -d '\r' | sed 's/[[:space:]]\+$//')
 		subfolder=$(jq -r ".[${ti}].transfer_to_subfolder_of_base_path" <<<"${COLLECT_FTRANSFERS_JSON}")
 		# Optional: enable snapshot streaming tar when enumeration finds 0 but quickcheck>0
-		snapshot_copy_if_zero=$(jq -r ".[${ti}].snapshot_copy_if_zero // false" <<<"${COLLECT_FTRANSFERS_JSON}")
+		# Snapshot behavior is implicit: if no files are enumerated but recheck detects matches,
+		# we perform a single-shot tar-stream snapshot without retries or extra config flags.
 		mapfile -t look_for < <(jq -r ".[${ti}].look_for[]" <<<"${COLLECT_FTRANSFERS_JSON}" || true)
 		if [[ -z ${look_into} || -z ${subfolder} ]]; then
 			log_warn "Skipping transfer index ${ti}: missing look_into or subfolder"
@@ -480,18 +481,18 @@ reg_total=$(find . -maxdepth 1 -mindepth 1 -type f -printf . 2>/dev/null | wc -c
 echo PRE:entries_total="$entries_total"
 echo PRE:regular_total="$reg_total"
 find . -maxdepth 1 -mindepth 1 -print 2>/dev/null | sed -e "s#^\./##" -e "s#^#PRE:list:#" || true
-# Per-pattern matches
+# Per-pattern matches (use compgen for parity with enumeration)
 for p in ${PATTERNS_GLOBS% }; do
-  echo PREPAT:pattern:"$p"
-  found=0
-  for rf in $p; do
-    [ -f "$rf" ] || continue
-    echo PREPAT:match:"$p":"$rf"
-    found=1
-  done
-  if [ $found -eq 0 ]; then
-    echo PREPAT:nomatch:"$p"
-  fi
+	echo PREPAT:pattern:"$p"
+	count=0
+	while IFS= read -r rf; do
+		[ -f "$rf" ] || continue
+		echo PREPAT:match:"$p":"$rf"
+		count=$((count+1))
+	done < <(compgen -G "$p" 2>/dev/null || true)
+	if [ "$count" -eq 0 ]; then
+		echo PREPAT:nomatch:"$p"
+	fi
 done
 PREEOF
 bash /tmp/__prescan.sh 2>/dev/null || true
@@ -502,6 +503,10 @@ rm -f /tmp/__prescan.sh
 			CGEN=$(ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" DIR_REMOTE="${look_into}" PAT_TOKEN="${p}" bash -lc $'cd "$DIR_REMOTE" 2>/dev/null || exit 0; compgen -G "$PAT_TOKEN" 2>/dev/null | wc -l' 2>/dev/null || true)
 			CGEN=${CGEN:-0}
 			log_info "Transfer ${ti} quickcheck: '${p}' -> ${CGEN}"
+			if [[ ${LOG_LEVEL:-info} == debug && ${CGEN:-0} -gt 0 ]]; then
+				QSAMPLE=$(ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" DIR_REMOTE="${look_into}" PAT_TOKEN="${p}" bash -lc $'cd "$DIR_REMOTE" 2>/dev/null || exit 0; compgen -G "$PAT_TOKEN" 2>/dev/null | head -5' 2>/dev/null || true)
+				while IFS= read -r qn; do [[ -n ${qn} ]] && log_debug "quickcheck sample: ${qn}"; done <<<"${QSAMPLE}"
+			fi
 		done
 		# Log concise prescan summary and details
 		if [[ -n ${REMOTE_PRESCAN} ]]; then
@@ -622,16 +627,17 @@ RSCRIPT
 					CGEN=${CGEN:-0}
 					QC_SUM=$((QC_SUM + CGEN))
 					log_info "Transfer ${ti} recheck: '${p}' -> ${CGEN}"
+					if [[ ${LOG_LEVEL:-info} == debug ]] && [[ ${CGEN:-0} -gt 0 ]]; then
+						QSAMPLE=$(ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" DIR_REMOTE="${look_into}" PAT_TOKEN="${p}" bash -lc $'cd "$DIR_REMOTE" 2>/dev/null || exit 0; compgen -G "$PAT_TOKEN" 2>/dev/null | head -5' 2>/dev/null || true)
+						while IFS= read -r qn; do [[ -n ${qn} ]] && log_debug "recheck sample: ${qn}"; done <<<"${QSAMPLE}"
+					fi
 				done
 				if ((QC_SUM > 0)); then
 					log_info "Transfer ${ti} hint: likely_race_condition (quickcheck/recheck>0 but enumeration=0)."
-					# Optional snapshot streaming copy if enabled at config level
-					if [[ ${snapshot_copy_if_zero} == "true" ]]; then
-						log_info "Transfer ${ti}: snapshot_copy_if_zero enabled; attempting tar-stream snapshot of matches."
-						# Build a remote tar stream of the compgen-expanded, deduped file set and extract on FE
-						SNAP_RC=0
-						set +e
-						ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" DIR_REMOTE="${look_into}" PATTERNS_GLOBS="${PATTERNS_GLOBS% }" bash -lc $'\
+					# Single-shot snapshot streaming copy to capture transient matches without adding retries
+					SNAP_RC=0
+					set +e
+					ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" DIR_REMOTE="${look_into}" PATTERNS_GLOBS="${PATTERNS_GLOBS% }" bash -lc $'\
 cd "$DIR_REMOTE" 2>/dev/null || exit 4\n\
 shopt -s nullglob\n\
 declare -A seen=()\nfiles=()\n\
@@ -646,28 +652,27 @@ for p in ${PATTERNS_GLOBS% }; do\n\
 done\n\
 (( ${#files[@]} == 0 )) && exit 7\n\
 tar -czf - --no-recursion -- "${files[@]}"\n' | tar -xzf - -C "${DEST_DIR}" 2>/dev/null
-						SNAP_RC=$?
-						set -e
-						case "${SNAP_RC}" in
-							0)
-								# Provide a brief summary after snapshot
-								DEST_AFTER_COUNT=$(find "${DEST_DIR}" -mindepth 1 -maxdepth 1 -printf '.' 2>/dev/null | wc -c | tr -d '[:space:]' || true)
-								log_success "Transfer ${ti} snapshot copy completed. FE entries now=${DEST_AFTER_COUNT:-0}"
-								# Show first entries
-								find "${DEST_DIR}" -mindepth 1 -maxdepth 1 -printf '%f\n' 2>/dev/null | head -10 | sed 's/^/FE: /' | while IFS= read -r L; do log_info "${L}"; done
-								continue
-								;;
-							4)
-								log_info "Transfer ${ti} snapshot: enumeration failed (cd error) into: ${look_into}"
-								;;
-							7)
-								log_info "Transfer ${ti} snapshot: no files to pack at snapshot moment."
-								;;
-							*)
-								log_info "Transfer ${ti} snapshot: tar-stream failed with rc=${SNAP_RC}; falling back to diagnostics."
-								;;
-						esac
-					fi
+					SNAP_RC=$?
+					set -e
+					case "${SNAP_RC}" in
+						0)
+							# Provide a brief summary after snapshot
+							DEST_AFTER_COUNT=$(find "${DEST_DIR}" -mindepth 1 -maxdepth 1 -printf '.' 2>/dev/null | wc -c | tr -d '[:space:]' || true)
+							log_success "Transfer ${ti} snapshot copy completed. FE entries now=${DEST_AFTER_COUNT:-0}"
+							# Show first entries
+							find "${DEST_DIR}" -mindepth 1 -maxdepth 1 -printf '%f\n' 2>/dev/null | head -10 | sed 's/^/FE: /' | while IFS= read -r L; do log_info "${L}"; done
+							continue
+							;;
+						4)
+							log_info "Transfer ${ti} snapshot: enumeration failed (cd error) into: ${look_into}"
+							;;
+						7)
+							log_info "Transfer ${ti} snapshot: no files to pack at snapshot moment."
+							;;
+						*)
+							log_info "Transfer ${ti} snapshot: tar-stream failed with rc=${SNAP_RC}; falling back to diagnostics."
+							;;
+					esac
 				fi
 				log_warn "Transfer ${ti}: no files matched in ${look_into} (patterns labels: ${look_for[*]} ; raw patterns: ${patterns[*]})"
 				# FE destination summary: what is currently there, and how patterns compare locally
