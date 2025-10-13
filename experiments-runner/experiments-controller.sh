@@ -613,6 +613,17 @@ RSCRIPT
 			# No retry per user request; proceed to diagnostics
 			# Check if remote dir exists to refine behavior
 			if ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" "test -d '${look_into}'" 2>/dev/null; then
+				# Recheck counts immediately to detect a likely race condition window
+				QC_SUM=0
+				for p in "${patterns[@]}"; do
+					CGEN=$(ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" DIR_REMOTE="${look_into}" PAT_TOKEN="${p}" bash -lc $'cd "$DIR_REMOTE" 2>/dev/null || exit 0; compgen -G "$PAT_TOKEN" 2>/dev/null | wc -l' 2>/dev/null || true)
+					CGEN=${CGEN:-0}
+					QC_SUM=$((QC_SUM + CGEN))
+					log_info "Transfer ${ti} recheck: '${p}' -> ${CGEN}"
+				done
+				if ((QC_SUM > 0)); then
+					log_info "Transfer ${ti} hint: likely_race_condition (quickcheck/recheck>0 but enumeration=0)."
+				fi
 				log_warn "Transfer ${ti}: no files matched in ${look_into} (patterns labels: ${look_for[*]} ; raw patterns: ${patterns[*]})"
 				# FE destination summary: what is currently there, and how patterns compare locally
 				DEST_COUNT=$(find "${DEST_DIR}" -mindepth 1 -maxdepth 1 -printf '.' 2>/dev/null | wc -c | tr -d '[:space:]' || true)
