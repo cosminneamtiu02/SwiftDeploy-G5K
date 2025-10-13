@@ -576,6 +576,18 @@ RSCRIPT
 			REMOTE_RC=${REMOTE_RAW##*__RC__:}
 			REMOTE_RAW=${REMOTE_RAW%__RC__:*}
 		fi
+		# Surface enumeration errors at info level for visibility
+		case "${REMOTE_RC}" in
+			3)
+				log_info "Transfer ${ti}: enumeration failed (directory missing or not a dir): ${look_into}"
+				;;
+			4)
+				log_info "Transfer ${ti}: enumeration failed (cd error) into: ${look_into}"
+				;;
+			*)
+				: # no-op for success and other codes
+				;;
+		esac
 		if [[ ${LOG_LEVEL:-info} == debug ]]; then
 			log_debug "Transfer ${ti}: remote enumeration exit code=${REMOTE_RC}; patterns tokens='${PATTERNS_GLOBS% }'"
 			# For every literal pattern, pre-check existence of that exact file (non-glob) remotely
