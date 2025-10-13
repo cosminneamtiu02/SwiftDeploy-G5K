@@ -493,6 +493,12 @@ PREEOF
 bash /tmp/__prescan.sh 2>/dev/null || true
 rm -f /tmp/__prescan.sh
 ' 2>/dev/null || true)
+		# Quick per-pattern compgen counts as an independent probe (info-level)
+		for p in "${patterns[@]}"; do
+			CGEN=$(ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" DIR_REMOTE="${look_into}" PAT_TOKEN="${p}" bash -lc $'cd "$DIR_REMOTE" 2>/dev/null || exit 0; compgen -G "$PAT_TOKEN" 2>/dev/null | wc -l' 2>/dev/null || true)
+			CGEN=${CGEN:-0}
+			log_info "Transfer ${ti} quickcheck: '${p}' -> ${CGEN}"
+		done
 		# Log concise prescan summary and details
 		if [[ -n ${REMOTE_PRESCAN} ]]; then
 			PRESCAN_REPORTED_MISSING=false
@@ -602,6 +608,16 @@ RSCRIPT
 		IFS=$'\n' read -r -d '' -a REMOTE_FILES < <(printf '%s' "${REMOTE_RAW}" && printf '\0') || true
 		# Exit codes 3/4 mean directory missing / cd failed
 		if ((${#REMOTE_FILES[@]} == 0)); then
+			# One-shot retry after a short delay in case writers flush right after delegation
+			log_info "Transfer ${ti}: no matches on first pass; retrying enumeration after 2s..."
+			sleep 2
+			REMOTE_RAW=$(ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" "DIR_REMOTE=${look_into} PATTERNS_GLOBS=${PATTERNS_GLOBS% } bash -lc $'${remote_script//$'\n'/\n}'; printf '__RC__:%s' $?" 2>/dev/null || true)
+			REMOTE_RC=0
+			if [[ ${REMOTE_RAW} == *'__RC__:'* ]]; then
+				REMOTE_RC=${REMOTE_RAW##*__RC__:}
+				REMOTE_RAW=${REMOTE_RAW%__RC__:*}
+			fi
+			IFS=$'\n' read -r -d '' -a REMOTE_FILES < <(printf '%s' "${REMOTE_RAW}" && printf '\0') || true
 			# Check if remote dir exists to refine behavior
 			if ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" "test -d '${look_into}'" 2>/dev/null; then
 				log_warn "Transfer ${ti}: no files matched in ${look_into} (patterns labels: ${look_for[*]} ; raw patterns: ${patterns[*]})"
@@ -667,7 +683,7 @@ echo DIAG:all_files_end
 plain_count=0; for f in *; do [ -f "$f" ] && plain_count=$((plain_count+1)); done
 echo DIAG:plain_file_count="$plain_count"
 echo DIAG:first_entries_start
-ls -1 | head -50 || true
+ls -la | head -50 | sed -e "s#^#DIAG:ls:#" || true
 echo DIAG:first_entries_end
 # Per-pattern detailed expansion
 for p in ${PATTERNS_GLOBS% }; do
