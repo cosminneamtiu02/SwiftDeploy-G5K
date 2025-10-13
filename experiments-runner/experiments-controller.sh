@@ -442,6 +442,8 @@ else
 		done
 		# Always show patterns used at info level to tie filenames to patterns
 		log_info "Transfer ${ti}: patterns used (raw) = ${patterns[*]} (labels: ${look_for[*]})"
+		# Explicitly log the exact lookup path used (absolute, no concatenation)
+		log_info "Transfer ${ti}: lookup path (node) = ${look_into}"
 		if ((${#patterns[@]} == 0)); then
 			log_warn "Transfer ${ti}: no patterns resolved from labels (${look_for[*]})"
 			continue
@@ -500,6 +502,10 @@ rm -f /tmp/__prescan.sh
 				HOSTNAME_NODE=$(ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" 'hostname' 2>/dev/null || true)
 				LOOK_INTO_ECHO=$(ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" "printf '%s' '${look_into}'" 2>/dev/null || true)
 				STAT_LINE=$(ssh -o StrictHostKeyChecking=no "root@${NODE_NAME}" "ls -ld -- '${look_into}' 2>/dev/null || echo 'ls_failed'" 2>/dev/null || true)
+				# Also surface what the prescan script saw for its dir variable and host
+				PS_DIR_VAR=$(printf '%s\n' "${REMOTE_PRESCAN}" | sed -n 's/^PRE:dir_var=\(.*\)$/\1/p' | head -1)
+				PS_HOST=$(printf '%s\n' "${REMOTE_PRESCAN}" | sed -n 's/^PRE:host=\(.*\)$/\1/p' | head -1)
+				[[ -n ${PS_DIR_VAR} ]] && log_info "Transfer ${ti} prescan saw dir_var='${PS_DIR_VAR}' (host='${PS_HOST:-?}')"
 				log_info "Transfer ${ti} debug: node='${HOSTNAME_NODE:-?}', look_into='${LOOK_INTO_ECHO}', ls='${STAT_LINE}'"
 				if [[ ${STAT_LINE} == ls_failed* ]]; then
 					# Both prescan and direct ls indicate missing → fatal
@@ -679,17 +685,19 @@ rm -f /tmp/__deep_diag.sh
 ' 2>/dev/null || true)
 				# Parse and log a concise summary at info level
 				if [[ -n ${REMOTE_DEEP_DIAG} ]]; then
-					DIAG_PWD=$(printf '%s\n' "${REMOTE_DEEP_DIAG}" | sed -n 's/^DIAG:pwd="\(.*\)"/\1/p' | head -1)
+					# Normalize CRs and then parse diagnostic fields
+					DIAG_CLEAN=$(printf '%s\n' "${REMOTE_DEEP_DIAG}" | tr -d '\r')
+					DIAG_PWD=$(printf '%s\n' "${DIAG_CLEAN}" | sed -n 's/^DIAG:pwd=\(.*\)$/\1/p' | head -1)
 					[[ -n ${DIAG_PWD} ]] && log_info "Transfer ${ti} diagnostics dir: ${DIAG_PWD}"
-					ENTRIES_COUNT=$(printf '%s\n' "${REMOTE_DEEP_DIAG}" | sed -n 's/^DIAG:entries_count="\([0-9]\+\)".*/\1/p' | head -1)
-					PLAIN_COUNT=$(printf '%s\n' "${REMOTE_DEEP_DIAG}" | sed -n 's/^DIAG:plain_file_count="\([0-9]\+\)".*/\1/p' | head -1)
-					NULLGLOB_STATE=$(printf '%s\n' "${REMOTE_DEEP_DIAG}" | sed -n 's/^shopt -\([su]\) nullglob$/\1/p' | head -1)
+					ENTRIES_COUNT=$(printf '%s\n' "${DIAG_CLEAN}" | sed -n 's/^DIAG:entries_count="\([0-9]\+\)".*/\1/p' | head -1)
+					PLAIN_COUNT=$(printf '%s\n' "${DIAG_CLEAN}" | sed -n 's/^DIAG:plain_file_count="\([0-9]\+\)".*/\1/p' | head -1)
+					NULLGLOB_STATE=$(printf '%s\n' "${DIAG_CLEAN}" | sed -n 's/^shopt -\([su]\) nullglob$/\1/p' | head -1)
 					case "${NULLGLOB_STATE}" in s) NULLGLOB_STATE="on" ;; u) NULLGLOB_STATE="off" ;; *) NULLGLOB_STATE="unknown" ;; esac
 					# Build per-pattern counts summary
 					PER_PATTERN_SUMMARY=()
 					for p in "${patterns[@]}"; do
 						P_ESC=$(printf '%s' "${p}" | sed 's/[\\.*\[\]\^$]/\\&/g')
-						cnt=$(printf '%s\n' "${REMOTE_DEEP_DIAG}" | sed -n "s/^DIAG:pattern_count:\"${P_ESC}\":count=\"\([0-9]\+\)\".*/\1/p" | head -1 || true)
+						cnt=$(printf '%s\n' "${DIAG_CLEAN}" | sed -n "s/^DIAG:pattern_count:\"${P_ESC}\":count=\"\([0-9]\+\)\".*/\1/p" | head -1 || true)
 						cnt=${cnt:-0}
 						PER_PATTERN_SUMMARY+=("'${p}'=${cnt}")
 					done
