@@ -5,7 +5,10 @@ IFS=$'\n\t'
 
 # repo roots
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-RUNNER_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+RUNNER_ROOT="${RUNNER_ROOT:-}"
+if [[ -z ${RUNNER_ROOT} ]]; then
+	RUNNER_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
+fi
 
 # Try to use liblog if sourced by callers; fallback to simple echo
 if ! declare -F log_info >/dev/null 2>&1; then
