@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# shellcheck disable=SC1090,SC2154,SC2029,SC2312
 set -euo pipefail
 IFS=$'\n\t'
 
@@ -28,6 +27,15 @@ fi
 # Load config variables (dynamic path; suppress SC1090)
 # shellcheck source=/dev/null
 source "${CONFIG_PATH}"
+
+# Validate required variables sourced from the config
+: "${GENERAL_NAME:?Missing GENERAL_NAME in ${CONFIG_PATH}}"
+: "${SETUP_SCRIPT:?Missing SETUP_SCRIPT in ${CONFIG_PATH}}"
+: "${OS_NAME:?Missing OS_NAME in ${CONFIG_PATH}}"
+: "${YAML_NAME:?Missing YAML_NAME in ${CONFIG_PATH}}"
+: "${YAML_ALIAS:?Missing YAML_ALIAS in ${CONFIG_PATH}}"
+: "${YAML_DESCRIPTION:?Missing YAML_DESCRIPTION in ${CONFIG_PATH}}"
+: "${YAML_AUTHOR:?Missing YAML_AUTHOR in ${CONFIG_PATH}}"
 
 # -------- DERIVED VARIABLES (from sourced config) --------
 # TAR file path (under user's home in dedicated img folder)
@@ -98,18 +106,18 @@ if ! scp "${LOCAL_SCRIPT_PATH}" "root@${node_name}:/root/${SETUP_SCRIPT}"; then
 	exit 1
 fi
 
+remote_script_path="/root/${SETUP_SCRIPT}"
+
 # -------- STEP 3: SSH into node and block --------
 echo "Running script on ${node_name} (blocking terminal)..."
-# shellcheck disable=SC2029
-if ! ssh "root@${node_name}" "bash /root/${SETUP_SCRIPT}"; then
+if ! ssh "root@${node_name}" bash -- "${remote_script_path}"; then
 	echo "Script failed on remote node."
 	exit 1
 fi
 
 # -------- STEP 4: Remove script from node --------
 echo "Removing script from ${node_name}..."
-# shellcheck disable=SC2029
-if ! ssh "root@${node_name}" "rm /root/${SETUP_SCRIPT}"; then
+if ! ssh "root@${node_name}" rm -- "${remote_script_path}"; then
 	echo "Warning: Failed to remove script from remote node."
 fi
 

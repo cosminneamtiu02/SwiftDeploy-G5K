@@ -6,8 +6,6 @@ IFS=$'\n\t'
 # repo roots
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RUNNER_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
-# shellcheck disable=SC2034 # REPO_ROOT available for callers
-REPO_ROOT="$(cd "${RUNNER_ROOT}/.." && pwd)"
 
 # Try to use liblog if sourced by callers; fallback to simple echo
 if ! declare -F log_info >/dev/null 2>&1; then
@@ -64,17 +62,37 @@ safe_scp_to_node() {
 	scp -o StrictHostKeyChecking=no -r "${src}" "root@${node}:${dst}"
 }
 
-# Robust directory transfer preserving permissions using tar over ssh
+# Robust directory transfer preserving permissions using tar over staged archive copy
 transfer_dir_via_tar() {
 	local src_dir="$1"
 	local node="$2"
 	local dst_dir="$3"
 	[[ -d ${src_dir} ]] || die "transfer_dir_via_tar: source dir not found: ${src_dir}"
-	# Ensure destination exists on remote
 	ssh -o BatchMode=yes -o StrictHostKeyChecking=no "root@${node}" "mkdir -p '${dst_dir}'" >/dev/null 2>&1 || {
 		echo "WARN: SSH not ready on ${node}. Can't create ${dst_dir}" >&2
 		return 1
 	}
-	# Stream tarball to remote and extract in destination
-	(cd "${src_dir}" && tar -cf - .) | ssh -o StrictHostKeyChecking=no "root@${node}" "tar -xf - -C '${dst_dir}'"
+	local archive_local
+	archive_local=$(mktemp) || die 'transfer_dir_via_tar: failed to create temporary archive.'
+	if ! (cd "${src_dir}" && tar -cf "${archive_local}" .); then
+		rm -f "${archive_local}"
+		die 'transfer_dir_via_tar: failed to create archive.'
+	fi
+	local archive_remote=""
+	archive_remote="/tmp/support_transfer.$(date +%s).tar"
+	if ! scp -o StrictHostKeyChecking=no "${archive_local}" "root@${node}:${archive_remote}" >/dev/null 2>&1; then
+		rm -f "${archive_local}"
+		echo "WARN: Failed to copy archive to ${node}" >&2
+		return 1
+	fi
+	local extract_rc=0
+	if ! ssh -o StrictHostKeyChecking=no "root@${node}" "tar -xf '${archive_remote}' -C '${dst_dir}' && rm -f '${archive_remote}'" >/dev/null 2>&1; then
+		extract_rc=1
+	fi
+	rm -f "${archive_local}"
+	if ((extract_rc != 0)); then
+		echo "WARN: Failed to extract archive on ${node}" >&2
+		return 1
+	fi
+	return 0
 }

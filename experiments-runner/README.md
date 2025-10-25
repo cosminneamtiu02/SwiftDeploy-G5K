@@ -23,22 +23,40 @@ This subproject automates Grid'5000 experiment workflows:
 ## Architecture overview
 
 ```text
-experiments-controller.sh (orchestrator)
- ├─ machine-instantiator/
- │    ├─ manual-machine-start.sh (validate SSH to target)
- │    └─ automatic-machine-start.sh (stub: exits 2)
- ├─ project-preparation/
- │    ├─ prepare-remote-structure.sh (create ~/experiments_node/*, upload on-machine scripts)
- │    └─ node-setup/
- │         ├─ write-env.sh (persist env vars)
- │         └─ install-dependencies.sh (apt/yum/dnf)
- ├─ experiments-delegator/
- │    ├─ on-fe/experiments-delegator.sh (select params, upload commands, stream logs)
- │    ├─ on-fe/utils-params-tracker.sh (tracker management)
- │    └─ on-machine/run-batch.sh (parallel exec; GNU parallel or fallback)
- └─ experiments-collector/
-     └─ on-machine/csnn_collection.sh (concat *.txt → collected_results.txt)
-```
+experiments-controller.sh (front-end orchestrator)
+ ├─ bin/
+ │    ├─ common/
+ │    │    ├─ environment.sh      # shared path + logging bootstrap
+ │    │    ├─ logging.sh          # thin wrapper around liblog
+ │    │    ├─ file_transfer.sh    # scp/tar helpers (legacy)
+ │    │    ├─ remote.sh           # upload + invoke remote scripts (legacy)
+ │    │    └─ collector.sh        # JSON parsing + validation (legacy)
+ │    ├─ selection/select_batch.sh
+ │    ├─ provisioning/provision_machine.sh
+ │    ├─ preparation/prepare_project_assets.sh
+ │    ├─ execution/delegate_experiments.sh
+ │    └─ collection/collect_artifacts.sh # shim -> pipeline/phase-collection
+ │
+ └─ pipeline/
+   ├─ common/
+   │    ├─ general-environment/environment.sh
+   │    ├─ general-logging/logging.sh
+   │    ├─ general-collector/
+   │    │    ├─ artifact-collector-bundle.sh
+   │    │    ├─ artifact-collector-logging.sh
+   │    │    ├─ artifact-collector-transfer.sh
+   │    │    ├─ collector-config.sh
+   │    │    ├─ artifact-state.sh
+   │    │    └─ file-transfer.sh
+   │    └─ general-remote/remote.sh
+   └─ phases/
+     └─ phase-collection/
+       ├─ collect-artifacts.sh
+       └─ remote-tools/
+         ├─ pre-scan.sh | enumerate.sh | deep-diag.sh
+         ├─ locator.sh (alt-path discovery)
+         └─ snapshot.sh (tar stream for racey outputs)
+ └─ logs/
 
 Remote layout on the target machine (created under the user’s home):
 
@@ -72,51 +90,30 @@ ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -i "$G5K_SSH_KEY" "$G5K
 
 ## Quick start
 
-1. Prepare a config JSON in `experiments-configurations/` (copy `_TEMPLATE.json` → `my-exp.json` or use `csnn-faces.json`).
+1. Prepare a config JSON in `experiments-configurations/`.
+  Copy `_TEMPLATE.json` to `my-exp.json` or start from `csnn-faces.json`.
 2. Export environment variables `G5K_USER`, `G5K_HOST`, `G5K_SSH_KEY`.
-3. Dry-run all phases (no side effects):
+3. Launch the full workflow (selection → instantiation → preparation → delegation → collection):
 
 ```bash
-./experiments-runner/experiments-controller.sh --config csnn-faces.json --dry-run --verbose
+./experiments-runner/experiments-controller.sh --config csnn-faces.json --verbose
 ```
 
-Run specific phases (comma-separated):
-
-```bash
-./experiments-runner/experiments-controller.sh --config my-exp.json --phases prepare,delegate
-```
-
-Disable live log streaming (still writes to files):
-
-```bash
-./experiments-runner/experiments-controller.sh --config my-exp.json --no-live-logs
-```
-
-Force manual instantiation script (default is manual unless config says otherwise):
-
-```bash
-./experiments-runner/experiments-controller.sh --config my-exp.json --manual
-```
-
-Logs are written to `experiments-runner/logs/<timestamp>/` and symlinked as `experiments-runner/logs/last-run`.
+Logs stream to `experiments-runner/logs/`. Each phase appends to dedicated
+`*.log` files inside the folder. State snapshots for troubleshooting reside under
+`logs/controller_state.*` during the run and are cleaned up automatically on
+success.
 
 ## Controller CLI
 
 ```bash
-./experiments-runner/experiments-controller.sh --config <FILENAME.json> [options]
+./experiments-runner/experiments-controller.sh --config <FILENAME.json> [--verbose]
 
-Options:
- -c, --config <filename>     Filename under experiments-configurations/ (required)
- -p, --phases <list>         instantiate,prepare,delegate,collect (default: all)
-   --dry-run               Print commands without executing
-   --verbose               More debug output
-   --continue-on-error     Do not stop after a failed phase
-   --manual                Force manual instantiation script
-   --log-dir <dir>         Custom logs directory (default: logs/<ts>)
-   --no-color              Disable colored logs
-   --no-live-logs          Do not stream logs live (still write to files)
- -h,   --help                Show help
-    --version             Print version
+Required:
+  --config <filename>   JSON config relative to experiments-configurations/
+
+Optional:
+  --verbose             Promote log level to DEBUG for all phases
 ```
 
 ## Configuration schema
@@ -150,31 +147,32 @@ Tip: Start from `_TEMPLATE.json` and replace absolute paths and values.
 
 ## Phase details
 
-- instantiate
-  - Runs `manual-machine-start.sh` (validates SSH) or `automatic-machine-start.sh` (stub; exits 2).
-- prepare
-  - Creates the remote tree under `~/experiments_node/on-machine/` and uploads
+- Runs `manual-machine-start.sh` (validates SSH) or `automatic-machine-start.sh` (stub; exits 2).
+- Creates the remote tree under `~/experiments_node/on-machine/` and uploads
     `run-batch.sh` and collection scripts.
-  - Persists env vars with `write-env.sh`. Package installation from config has
+- Persists env vars with `write-env.sh`. Package installation from config has
     been removed; perform any dependency setup inside your image or manually.
-- delegate
-  - `on-fe/experiments-delegator.sh` selects up to N TODO lines from the params file
+- `on-fe/experiments-delegator.sh` selects up to N TODO lines from the params file
     using a tracker `*_tracker.txt` (same folder).
-  - Uploads a `commands.pending` file to the remote bootstrap folder and calls
+- Uploads a `commands.pending` file to the remote bootstrap folder and calls
     `on-machine/run-batch.sh` with `--parallel N`.
-  - Streams remote logs from `~/experiments_node/on-machine/logs/`
+- Streams remote logs from `~/experiments_node/on-machine/logs/`
     (use `--no-stream` to disable).
-- collect
-  - Default `csnn_collection.sh` concatenates all `*.txt` under the machine path
-    into `collected_results.txt` inside the FE path.
-  - Note: By default, this runs on the machine; pull results to your FE if needed
-    via `scp`.
+- Phase 4 now drives a reusable collector pipeline: prescan → quickcheck →
+    enumeration → copy.
+- Remote helpers live in `pipeline/phases/phase-collection/remote-tools/` and are uploaded
+  automatically per run.
+- Default `csnn_collection.sh` remains available for manual use, but the
+    controller primarily relies on lookup rules + file transfer directives
+    defined in the config JSON.
 
 ## Delegation & tracker behavior
 
 - The tracker file is `${params_file%.txt}_tracker.txt` next to your params file.
-- TODO lines = params minus tracker (exact string match after trimming and removing comments).
-- If fewer than N TODO lines remain, only those are run (including 0, in which case the delegator exits with a friendly message).
+- TODO lines = params minus tracker (exact string match after trimming and
+  removing comments).
+- If fewer than N TODO lines remain, only those are run. When the count is
+  zero, the delegator exits with a friendly message.
 
 ## Logs and where to look
 
@@ -185,7 +183,8 @@ Tip: Start from `_TEMPLATE.json` and replace absolute paths and values.
 
 ## Exit codes (summary)
 
-- experiments-controller.sh: 0 success; 2 on invalid args/dependencies/config; propagates non-zero from phases unless `--continue-on-error`
+- experiments-controller.sh: 0 success; 2 on invalid args, dependencies, or
+  config; propagates non-zero from phases unless `--continue-on-error`
 - machine-instantiator/automatic-machine-start.sh: 2 (not implemented yet)
 - machine-instantiator/manual-machine-start.sh: 1 missing env/SSH key; 2 SSH connectivity failure
 - project-preparation/prepare-remote-structure.sh: 2 on invalid args/missing tools; non-zero on remote failures
@@ -269,7 +268,6 @@ This will write collected outputs to `experiments-runner/collected/csnn-ckplus/c
 Example layout:
 
 ```text
-
 experiments-runner/params/
   project-a/
     a.txt            # params for project A
@@ -277,8 +275,7 @@ experiments-runner/params/
   project-b/
     b.txt
     b_tracker.txt
-
-```text
+```
 
 How to use:
 
@@ -291,24 +288,18 @@ How to use:
 Note: `.gitignore` already ignores `experiments-runner/params/**/*_tracker.txt`
 so trackers won't be committed.
 
-## Examples
+## Common commands
 
-Dry-run all phases with verbose logs:
+Run the full workflow with default logging:
 
 ```bash
-./experiments-runner/experiments-controller.sh --config csnn-faces.json --dry-run --verbose
+./experiments-runner/experiments-controller.sh --config csnn-faces.json
 ```
 
-Prepare remote structure only:
+Enable verbose (debug) logging for troubleshooting:
 
 ```bash
-./experiments-runner/experiments-controller.sh --config my-exp.json --phases prepare
-```
-
-Delegate with no live streaming and continue after failures:
-
-```bash
-./experiments-runner/experiments-controller.sh --config my-exp.json --phases delegate --no-live-logs --continue-on-error
+./experiments-runner/experiments-controller.sh --config csnn-faces.json --verbose
 ```
 
 Tail logs from the last run:

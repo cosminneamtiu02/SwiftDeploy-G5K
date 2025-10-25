@@ -8,10 +8,9 @@ CONFIG_JSON_PATH="${CONFIG_JSON:-${BASE_DIR}/config.json}"
 PARAMS_FILE="${BASE_DIR}/params.txt"
 TRACKER_FILE="${PARAMS_FILE%.*}_tracker.txt"
 LOGS_DIR="${BASE_DIR}/on-machine/logs"
-# shellcheck source=/root/experiments_node/on-machine/.env
-if [[ -f "${BASE_DIR}/on-machine/.env" ]]; then
+# shellcheck source=/dev/null
+if [[ -r "${BASE_DIR}/on-machine/.env" ]]; then
 	# Only source if present
-	# shellcheck disable=SC1091
 	source "${BASE_DIR}/on-machine/.env"
 fi
 
@@ -58,9 +57,17 @@ if [[ -n ${SELECTED_PARAMS_B64:-} ]]; then
 	mapfile -t batch <<<"${decoded_params}"
 else
 	# Build todo vs done sets on node
-	mapfile -t todo < <(grep -v '^[[:space:]]*$' "${PARAMS_FILE}" || true)
+	todo=()
+	decoded_todo=$(grep -v '^[[:space:]]*$' "${PARAMS_FILE}" || true)
+	if [[ -n ${decoded_todo} ]]; then
+		mapfile -t todo <<<"${decoded_todo}"
+	fi
 	if [[ -f ${TRACKER_FILE} ]]; then
-		mapfile -t already_done < <(grep -v '^[[:space:]]*$' "${TRACKER_FILE}" || true)
+		already_done=()
+		tracker_lines=$(grep -v '^[[:space:]]*$' "${TRACKER_FILE}" || true)
+		if [[ -n ${tracker_lines} ]]; then
+			mapfile -t already_done <<<"${tracker_lines}"
+		fi
 	else
 		already_done=()
 	fi
@@ -116,8 +123,12 @@ revert_tracker_entries() {
 	[[ -s ${BATCH_MARK_FILE} && -f ${TRACKER_FILE} ]] || return 0
 	tmp_trk="${TRACKER_FILE}.tmp.$$"
 	# Remove exactly one occurrence of each line listed in BATCH_MARK_FILE
-	awk 'BEGIN{ while((getline line<ARGV[2])>0){c[line]++} close(ARGV[2]) } { if(c[$0]>0){ c[$0]--; next } print }' \
-		"${TRACKER_FILE}" "${BATCH_MARK_FILE}" >"${tmp_trk}" && mv "${tmp_trk}" "${TRACKER_FILE}" || true
+	if awk 'BEGIN{ while((getline line<ARGV[2])>0){c[line]++} close(ARGV[2]) } { if(c[$0]>0){ c[$0]--; next } print }' \
+		"${TRACKER_FILE}" "${BATCH_MARK_FILE}" >"${tmp_trk}"; then
+		mv "${tmp_trk}" "${TRACKER_FILE}" || true
+	else
+		rm -f "${tmp_trk}" 2>/dev/null || true
+	fi
 	REVERT_DONE=1
 }
 
@@ -159,11 +170,21 @@ if command -v parallel >/dev/null 2>&1; then
 		tee -a "${LOGS_DIR}/delegator.log"
 else
 	pids=()
+	run_single_param() {
+		local params="$1"
+		local outfile=""
+		local timestamp
+		timestamp=$(date +%s)
+		local safe_params
+		safe_params=$(printf '%s' "${params}" | tr ' ' '_')
+		outfile="${LOGS_DIR}/${timestamp}_${safe_params}.out"
+		if ! sh -c "${BUF_PREFIX} ${EXEC_CMD} ${params}" 2>&1 | tee -a "${LOGS_DIR}/delegator.log" | tee "${outfile}"; then
+			return 1
+		fi
+		return 0
+	}
 	for params in "${batch[@]}"; do
-		# Run in background and stream both stdout/stderr; keep live stdout for FE, and tee to logs
-		# shellcheck disable=SC2312
-		outfile="${LOGS_DIR}/$(date +%s)_$(echo "${params}" | tr ' ' '_').out"
-		sh -c "${BUF_PREFIX} ${EXEC_CMD} ${params}" 2>&1 | tee -a "${LOGS_DIR}/delegator.log" | tee "${outfile}" &
+		run_single_param "${params}" &
 		pids+=("$!")
 	done
 	# wait for all

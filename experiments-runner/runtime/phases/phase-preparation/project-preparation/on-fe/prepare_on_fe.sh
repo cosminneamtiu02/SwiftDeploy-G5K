@@ -1,15 +1,26 @@
 #!/usr/bin/env bash
+# shellcheck shell=bash
+# shellcheck source-path=../../../../common
+# shellcheck source-path=../../../../support/utils
 # Prepare FE -> Node: create remote structure, upload config and scripts
 set -Eeuo pipefail
 IFS=$'\n\t'
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# From on-fe -> project-preparation -> bin -> experiments-runner (3 levels up)
-RUNNER_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
-# shellcheck source=/dev/null
-source "${RUNNER_ROOT}/bin/utils/common.sh"
-# shellcheck source=/dev/null
-source "${RUNNER_ROOT}/bin/utils/liblog.sh"
+COMMON_ENV="$(cd "${SCRIPT_DIR}/../../../../common" && pwd)/environment.sh"
+if [[ ! -f ${COMMON_ENV} ]]; then
+	die "Missing common environment script at ${COMMON_ENV}"
+fi
+# shellcheck source=experiments-runner/runtime/common/environment.sh
+source "${COMMON_ENV}"
+runner_env::bootstrap
+
+UTILS_ROOT="${UTILS_ROOT:-$(cd "${SCRIPT_DIR}/../../../../support/utils" && pwd)}"
+if [[ ! -f "${UTILS_ROOT}/common.sh" ]]; then
+	die "Missing support utils script at ${UTILS_ROOT}/common.sh"
+fi
+# shellcheck source=experiments-runner/runtime/support/utils/common.sh
+source "${UTILS_ROOT}/common.sh"
 
 __on_err() {
 	local exit_code=$?
@@ -23,8 +34,7 @@ trap __on_err ERR
 NODE_NAME=""
 CONFIG_PATH=""
 OS_TYPE="1"
-# shellcheck disable=SC2034 # LOG_DIR kept for future use / debugging
-LOG_DIR="${RUNNER_ROOT}/logs" # reserved for future use (debugging)
+LOG_DIR="${LOG_ROOT}" # reserved for future use (debugging)
 
 while [[ $# -gt 0 ]]; do
 	case "$1" in
@@ -63,16 +73,22 @@ PAR_FILE=$(resolve_params_path "${PAR_PATH}")
 REMOTE_BASE="/root/experiments_node"
 REMOTE_ON_MACHINE_DIR="${REMOTE_BASE}/on-machine"
 REMOTE_LOGS_DIR="${REMOTE_BASE}/on-machine/logs"
-# NOTE: remote delegator dir equals on-machine; kept for readability
-# shellcheck disable=SC2034 # kept for readability even if not used directly
-REMOTE_DELEGATOR_DIR="${REMOTE_BASE}/on-machine"
 
 # Create base dirs
 log_info "Creating remote directories on ${NODE_NAME}"
-if ! remote_mkdir_via_ssh "${NODE_NAME}" "${REMOTE_ON_MACHINE_DIR}"; then
+mkdir_rc=0
+set +e
+remote_mkdir_via_ssh "${NODE_NAME}" "${REMOTE_ON_MACHINE_DIR}"
+mkdir_rc=$?
+set -e
+if ((mkdir_rc != 0)); then
 	log_warn "SSH not ready on ${NODE_NAME}. Skipping remote mkdir. After deploy is ready, rerun controller or run this step manually."
 fi
-if ! remote_mkdir_via_ssh "${NODE_NAME}" "${REMOTE_LOGS_DIR}"; then
+set +e
+remote_mkdir_via_ssh "${NODE_NAME}" "${REMOTE_LOGS_DIR}"
+mkdir_rc=$?
+set -e
+if ((mkdir_rc != 0)); then
 	log_warn "SSH not ready on ${NODE_NAME}. Skipping remote logs mkdir."
 fi
 
@@ -96,8 +112,8 @@ fi
 log_info "Uploading on-machine scripts"
 if ssh -o BatchMode=yes -o StrictHostKeyChecking=no "root@${NODE_NAME}" 'echo ok' >/dev/null 2>&1; then
 	# Use tar-over-ssh to avoid scp quirks with trailing dots and to preserve perms
-	transfer_dir_via_tar "${RUNNER_ROOT}/bin/project-preparation/on-machine" "${NODE_NAME}" "${REMOTE_ON_MACHINE_DIR}"
-	transfer_dir_via_tar "${RUNNER_ROOT}/bin/experiments-delegator/on-machine" "${NODE_NAME}" "${REMOTE_ON_MACHINE_DIR}"
+	transfer_dir_via_tar "${PREPARATION_ROOT}/project-preparation/on-machine" "${NODE_NAME}" "${REMOTE_ON_MACHINE_DIR}"
+	transfer_dir_via_tar "${EXECUTION_ROOT}/experiments-delegator/on-machine" "${NODE_NAME}" "${REMOTE_ON_MACHINE_DIR}"
 else
 	log_warn "SSH not ready on ${NODE_NAME}. Skipping script upload."
 fi

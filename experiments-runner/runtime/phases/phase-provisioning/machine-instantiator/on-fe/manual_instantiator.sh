@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# shellcheck shell=bash
+# shellcheck source-path=../../../../common
 # Manual machine instantiation with auto-detection of allocated node
 # - Verifies YAML exists under ~/envs/img-files
 # - Tries to detect node from OAR nodefile or oarstat
@@ -13,10 +15,14 @@ if [[ -z ${YAML_NAME} ]]; then
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# From on-fe -> machine-instantiator -> bin -> experiments-runner (3 levels up)
-RUNNER_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
-# shellcheck source=/dev/null
-source "${RUNNER_ROOT}/bin/utils/liblog.sh"
+COMMON_ENV="$(cd "${SCRIPT_DIR}/../../../../common" && pwd)/environment.sh"
+if [[ ! -f ${COMMON_ENV} ]]; then
+	COMMON_ENV="experiments-runner/runtime/common/environment.sh"
+fi
+# shellcheck source=experiments-runner/runtime/common/environment.sh
+source "${COMMON_ENV}"
+runner_env::bootstrap
+
 CURRENT_NODE_FILE="${RUNNER_ROOT}/current_node.txt"
 YAML_DIR="${HOME}/envs/img-files"
 YAML_PATH="${YAML_DIR}/${YAML_NAME}"
