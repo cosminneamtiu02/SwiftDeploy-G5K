@@ -15,7 +15,7 @@ runner_env::bootstrap
 runner_env::require_cmd jq
 runner_env::require_cmd base64
 
-STATE_HEADER="# Selection state file\n# shell formatted key=value entries\n"
+STATE_HEADER=$'# Selection state file\n# shell formatted key=value entries\n'
 
 usage() {
 	cat <<'EOF'
