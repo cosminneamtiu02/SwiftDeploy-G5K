@@ -14,7 +14,7 @@ runner_env::bootstrap
 
 runner_env::require_cmd jq
 
-STATE_HEADER="# Project preparation state\n"
+STATE_HEADER=$'# Project preparation state\n'
 
 usage() {
 	cat <<'EOF'

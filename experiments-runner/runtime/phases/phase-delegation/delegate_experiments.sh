@@ -12,7 +12,7 @@ COMMON_DIR="${RUNTIME_DIR}/common"
 source "${COMMON_DIR}/environment.sh"
 runner_env::bootstrap
 
-STATE_HEADER="# Delegation state\n"
+STATE_HEADER=$'# Delegation state\n'
 
 usage() {
 	cat <<'EOF'
