@@ -65,3 +65,35 @@ _pipeline_env_bootstrap() {
 pipeline_env::bootstrap() {
 	_pipeline_env_bootstrap
 }
+
+pipeline_env::require_command() {
+	local command_name="${1:-}"
+	if [[ -z ${command_name} ]]; then
+		printf 'pipeline_env::require_command expects a command name.\n' >&2
+		exit 1
+	fi
+	if declare -F runner_env::require_cmd >/dev/null 2>&1; then
+		runner_env::require_cmd "${command_name}"
+		return 0
+	fi
+	if ! command -v "${command_name}" >/dev/null 2>&1; then
+		printf 'Missing required command: %s\n' "${command_name}" >&2
+		exit 1
+	fi
+}
+
+pipeline_env::ensure_directory() {
+	local target_dir="${1:-}"
+	if [[ -z ${target_dir} ]]; then
+		printf 'pipeline_env::ensure_directory expects a directory path.\n' >&2
+		exit 1
+	fi
+	if declare -F runner_env::ensure_directory >/dev/null 2>&1; then
+		runner_env::ensure_directory "${target_dir}"
+		return 0
+	fi
+	mkdir -p "${target_dir}" 2>/dev/null || {
+		printf 'Failed to create directory: %s\n' "${target_dir}" >&2
+		exit 1
+	}
+}
