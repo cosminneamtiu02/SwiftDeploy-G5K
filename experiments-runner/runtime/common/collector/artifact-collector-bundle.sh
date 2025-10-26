@@ -53,7 +53,8 @@ pipeline_artifact_bundle::cleanup() {
 	local node="${1:-}"
 	local bundle_dir="${2:-}"
 	if [[ -z ${node} || -z ${bundle_dir} ]]; then
-		die 'pipeline_artifact_bundle::cleanup expects node and bundle path.'
+		log_warn 'pipeline_artifact_bundle::cleanup invoked without node/bundle; skipping remote cleanup.'
+		return 0
 	fi
 	local script
 	for script in "${PIPELINE_ARTIFACT_REMOTE_TOOLS[@]}"; do

@@ -93,7 +93,9 @@ pipeline_collect_artifacts::run() {
 
 	local bundle_dir
 	bundle_dir=$(pipeline_artifact_bundle::deploy "${node_name}")
-	trap 'pipeline_artifact_bundle::cleanup "'"${node_name}"' "'"${bundle_dir}"'' EXIT
+	declare -g PIPELINE_ARTIFACT_BUNDLE_NODE="${node_name}"
+	declare -g PIPELINE_ARTIFACT_BUNDLE_DIR="${bundle_dir}"
+	trap 'pipeline_artifact_bundle::cleanup "${PIPELINE_ARTIFACT_BUNDLE_NODE:-}" "${PIPELINE_ARTIFACT_BUNDLE_DIR:-}"' EXIT
 
 	local transfer_total
 	transfer_total=$(pipeline_collector::transfer_count "${transfers_json}")
