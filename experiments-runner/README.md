@@ -7,19 +7,6 @@ This subproject automates Grid'5000 experiment workflows:
 3. Experiment delegation (parallel, tracked, live logs)
 4. Results collection
 
-## Live Progress Checklist
-
-- [x] Create directory tree and placeholders
-- [x] Implement lib utilities (logging, JSON, remote, OS detect)
-- [x] Author _TEMPLATE.json and csnn-faces.json example
-- [x] Implement manual-machine-start.sh and automatic-machine-start.sh (stubbed)
-- [x] Implement prepare-remote-structure.sh + node-setup scripts
-- [x] Implement experiments-delegator (FE + machine) incl. tracker logic & parallel exec
-- [x] Implement csnn_collection.sh collection strategy
-- [x] Implement experiments-controller.sh orchestrator
-- [x] Write README.md with full usage & troubleshooting (expand)
-- [x] Smoke tests (dry-run + happy path)
-
 ## Architecture overview
 
 ```text

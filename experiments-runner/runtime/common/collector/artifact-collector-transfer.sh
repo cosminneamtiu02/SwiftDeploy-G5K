@@ -477,8 +477,8 @@ pipeline_artifact_transfer::process_transfer() {
 	declare -n rule_map_ref="${rule_map_name}"
 	local transfers_json="${7:-}"
 
-	local look_into
-	local subfolder
+	local look_into=""
+	local subfolder=""
 	local labels=()
 	pipeline_collector::get_transfer "${transfers_json}" "${transfer_idx}" look_into subfolder labels
 	local patterns=()
