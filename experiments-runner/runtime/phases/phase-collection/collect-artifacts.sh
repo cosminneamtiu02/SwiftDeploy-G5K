@@ -18,6 +18,8 @@ PIPELINE_COLLECTOR_ROOT="${PIPELINE_COLLECTOR_ROOT:-${PIPELINE_COMMON_ROOT}/coll
 source "${PIPELINE_COLLECTOR_ROOT}/collector-config.sh"
 # shellcheck source=experiments-runner/runtime/common/collector/artifact-state.sh
 source "${PIPELINE_COLLECTOR_ROOT}/artifact-state.sh"
+# shellcheck source=experiments-runner/runtime/common/collector/artifact-collector-logging.sh
+source "${PIPELINE_COLLECTOR_ROOT}/artifact-collector-logging.sh"
 # shellcheck source=experiments-runner/runtime/common/collector/artifact-collector-bundle.sh
 source "${PIPELINE_COLLECTOR_ROOT}/artifact-collector-bundle.sh"
 # shellcheck source=experiments-runner/runtime/common/collector/artifact-collector-transfer.sh
