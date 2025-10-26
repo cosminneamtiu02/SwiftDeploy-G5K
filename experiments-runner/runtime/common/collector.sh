@@ -63,15 +63,30 @@ collector::load_config() {
 	local base_path_var="$2"
 	local rules_var="$3"
 	local transfers_var="$4"
+	local base_path_raw
 	local base_path
 	local rules_json
 	local transfers_json
-	base_path=$(jq -r '.running_experiments.experiments_collection.base_path // empty' "${config_path}")
-	base_path=$(collector::__normalize_scalar "${base_path}")
+	base_path_raw=$(jq -r '.running_experiments.experiments_collection.base_path // empty' "${config_path}" 2>/dev/null || printf '')
+	log_debug "collector::load_config raw base_path=$(printf '%q' "${base_path_raw}") length=${#base_path_raw}"
+	base_path=$(collector::__normalize_scalar "${base_path_raw}")
+	log_debug "collector::load_config normalized base_path=$(printf '%q' "${base_path}") length=${#base_path}"
+	if [[ -n ${base_path_raw} && -z ${base_path} ]]; then
+		log_warn "collector::load_config: sanitized base_path resolved empty; using raw value"
+		base_path="${base_path_raw}"
+	fi
 	collector::__set_scalar "${base_path_var}" "${base_path}"
-	rules_json=$(jq -c '.running_experiments.experiments_collection.lookup_rules // []' "${config_path}")
+	rules_json=$(jq -c '.running_experiments.experiments_collection.lookup_rules // []' "${config_path}" 2>/dev/null || printf '[]')
+	if [[ -z ${rules_json} ]]; then
+		log_warn "collector::load_config: lookup_rules evaluation returned empty; defaulting to []"
+		rules_json='[]'
+	fi
 	collector::__set_scalar "${rules_var}" "${rules_json}"
-	transfers_json=$(jq -c '.running_experiments.experiments_collection.ftransfers // []' "${config_path}")
+	transfers_json=$(jq -c '.running_experiments.experiments_collection.ftransfers // []' "${config_path}" 2>/dev/null || printf '[]')
+	if [[ -z ${transfers_json} ]]; then
+		log_warn "collector::load_config: ftransfers evaluation returned empty; defaulting to []"
+		transfers_json='[]'
+	fi
 	collector::__set_scalar "${transfers_var}" "${transfers_json}"
 }
 
