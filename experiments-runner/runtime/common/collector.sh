@@ -41,6 +41,23 @@ collector::__assoc_set() {
 	eval "${__collector_cmd}"
 }
 
+collector::__normalize_scalar() {
+	local value="${1-}"
+	if [[ -z ${value} ]]; then
+		printf '%s' ""
+		return
+	fi
+	local normalized="${value}"
+	local tmp
+	if tmp=$(printf '%s' "${normalized}" | tr -d '\r' 2>/dev/null); then
+		normalized="${tmp}"
+	fi
+	if tmp=$(printf '%s' "${normalized}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' 2>/dev/null); then
+		normalized="${tmp}"
+	fi
+	printf '%s' "${normalized}"
+}
+
 collector::load_config() {
 	local config_path="${1:-}"
 	local base_path_var="$2"
@@ -50,6 +67,7 @@ collector::load_config() {
 	local rules_json
 	local transfers_json
 	base_path=$(jq -r '.running_experiments.experiments_collection.base_path // empty' "${config_path}")
+	base_path=$(collector::__normalize_scalar "${base_path}")
 	collector::__set_scalar "${base_path_var}" "${base_path}"
 	rules_json=$(jq -c '.running_experiments.experiments_collection.lookup_rules // []' "${config_path}")
 	collector::__set_scalar "${rules_var}" "${rules_json}"
@@ -61,6 +79,7 @@ collector::validate_config() {
 	local base_path="${1:-}"
 	local rules_json="${2:-}"
 	local transfers_json="${3:-}"
+	base_path=$(collector::__normalize_scalar "${base_path}")
 	if [[ -z ${base_path} ]]; then
 		return 0
 	fi
@@ -92,7 +111,9 @@ collector::validate_config() {
 		local look_into
 		local subfolder
 		look_into=$(jq -r ".[${i}].look_into // empty" <<<"${transfers_json}")
+		look_into=$(collector::__normalize_scalar "${look_into}")
 		subfolder=$(jq -r ".[${i}].transfer_to_subfolder_of_base_path // empty" <<<"${transfers_json}")
+		subfolder=$(collector::__normalize_scalar "${subfolder}")
 		if [[ -z ${look_into} ]]; then
 			die "ftransfers[${i}].look_into missing"
 		fi
@@ -155,8 +176,10 @@ collector::get_transfer() {
 	local look_into
 	local subfolder
 	look_into=$(jq -r ".[${index}].look_into" <<<"${transfers_json}")
+	look_into=$(collector::__normalize_scalar "${look_into}")
 	collector::__set_scalar "${look_into_var}" "${look_into}"
 	subfolder=$(jq -r ".[${index}].transfer_to_subfolder_of_base_path" <<<"${transfers_json}")
+	subfolder=$(collector::__normalize_scalar "${subfolder}")
 	collector::__set_scalar "${subfolder_var}" "${subfolder}"
 	local look_for_list=()
 	local look_for_output=""

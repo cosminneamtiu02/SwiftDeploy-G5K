@@ -51,6 +51,7 @@ pipeline_collect_artifacts::run() {
 
 	local dest_root
 	dest_root="${HOME}/collected/${base_path}"
+	log_info "Collector destination root: ${dest_root}"
 	pipeline_env::ensure_directory "${dest_root}"
 
 	declare -A rule_map=()
