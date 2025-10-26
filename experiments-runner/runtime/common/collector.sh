@@ -188,6 +188,15 @@ collector::get_transfer() {
 		mapfile -t look_for_list <<<"${look_for_output}"
 	fi
 	collector::__set_array "${look_for_var}" "${look_for_list[@]}"
+	local debug_labels=""
+	if ((${#look_for_list[@]} > 0)); then
+		local __collector_label
+		for __collector_label in "${look_for_list[@]}"; do
+			debug_labels+="$(printf '%q' "${__collector_label}") "
+		done
+		debug_labels=${debug_labels% }
+	fi
+	log_debug "collector::get_transfer idx=${index} look_into=$(printf '%q' "${look_into}") subfolder=$(printf '%q' "${subfolder}") labels=${debug_labels:-<none>}"
 }
 
 collector::patterns_from_labels() {
