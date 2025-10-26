@@ -188,14 +188,14 @@ collector::get_transfer() {
 	local look_into_var="$3"
 	local subfolder_var="$4"
 	local look_for_var="$5"
-	local look_into
-	local subfolder
-	look_into=$(jq -r ".[${index}].look_into" <<<"${transfers_json}")
-	look_into=$(collector::__normalize_scalar "${look_into}")
-	collector::__set_scalar "${look_into_var}" "${look_into}"
-	subfolder=$(jq -r ".[${index}].transfer_to_subfolder_of_base_path" <<<"${transfers_json}")
-	subfolder=$(collector::__normalize_scalar "${subfolder}")
-	collector::__set_scalar "${subfolder_var}" "${subfolder}"
+	local look_into_value
+	local subfolder_value
+	look_into_value=$(jq -r ".[${index}].look_into" <<<"${transfers_json}")
+	look_into_value=$(collector::__normalize_scalar "${look_into_value}")
+	collector::__set_scalar "${look_into_var}" "${look_into_value}"
+	subfolder_value=$(jq -r ".[${index}].transfer_to_subfolder_of_base_path" <<<"${transfers_json}")
+	subfolder_value=$(collector::__normalize_scalar "${subfolder_value}")
+	collector::__set_scalar "${subfolder_var}" "${subfolder_value}"
 	local look_for_list=()
 	local look_for_output=""
 	look_for_output=$(jq -r ".[${index}].look_for[]" <<<"${transfers_json}" || true)
@@ -211,7 +211,7 @@ collector::get_transfer() {
 		done
 		debug_labels=${debug_labels% }
 	fi
-	log_debug "collector::get_transfer idx=${index} look_into=$(printf '%q' "${look_into}") subfolder=$(printf '%q' "${subfolder}") labels=${debug_labels:-<none>}"
+	log_debug "collector::get_transfer idx=${index} look_into=$(printf '%q' "${look_into_value}") subfolder=$(printf '%q' "${subfolder_value}") labels=${debug_labels:-<none>}"
 }
 
 collector::patterns_from_labels() {

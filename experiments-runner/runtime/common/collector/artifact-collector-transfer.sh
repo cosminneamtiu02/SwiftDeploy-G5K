@@ -482,7 +482,7 @@ pipeline_artifact_transfer::process_transfer() {
 	local labels=()
 	pipeline_collector::get_transfer "${transfers_json}" "${transfer_idx}" look_into subfolder labels
 	local patterns=()
-	pipeline_collector::patterns_from_labels "${rule_map_name}" labels patterns
+	pipeline_collector::patterns_from_labels "${rule_map_name}" "labels" "patterns"
 	: "${rule_map_ref[@]:-}"
 	: "${labels[@]:-}"
 	: "${patterns[@]:-}"
@@ -491,6 +491,6 @@ pipeline_artifact_transfer::process_transfer() {
 	dest_dir="${dest_root}/${subfolder}"
 	pipeline_env::ensure_directory "${dest_dir}"
 
-	pipeline_artifact_logging::log_transfer_intro "${transfer_idx}" "${look_into}" "${dest_dir}" labels patterns
-	pipeline_artifact_transfer::handle_transfer "${transfer_idx}" "${node_name}" "${look_into}" "${dest_dir}" "${bundle_dir}" "${exec_dir}" patterns
+	pipeline_artifact_logging::log_transfer_intro "${transfer_idx}" "${look_into}" "${dest_dir}" "labels" "patterns"
+	pipeline_artifact_transfer::handle_transfer "${transfer_idx}" "${node_name}" "${look_into}" "${dest_dir}" "${bundle_dir}" "${exec_dir}" "patterns"
 }
