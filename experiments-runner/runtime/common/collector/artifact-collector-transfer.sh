@@ -36,7 +36,7 @@ pipeline_artifact_transfer::run_prescan() {
 	declare -n patterns_ref="${patterns_ref_name}"
 	local output_var="$6"
 	local patterns_joined=""
-	pipeline_artifact_transfer::join_patterns patterns_ref patterns_joined
+	pipeline_artifact_transfer::join_patterns "${patterns_ref_name}" patterns_joined
 	log_debug "Transfer ${transfer_idx}: running prescan with patterns '${patterns_joined}'"
 	local prescan_tmp=""
 	prescan_tmp=$(mktemp) || return 1
@@ -95,7 +95,7 @@ pipeline_artifact_transfer::run_enumerate() {
 	declare -n patterns_ref="${patterns_ref_name}"
 	local output_var="$5"
 	local patterns_joined=""
-	pipeline_artifact_transfer::join_patterns patterns_ref patterns_joined
+	pipeline_artifact_transfer::join_patterns "${patterns_ref_name}" patterns_joined
 	local tmp_output=""
 	tmp_output=$(mktemp) || return 1
 	local rc=0
@@ -125,7 +125,7 @@ pipeline_artifact_transfer::run_deep_diag() {
 	declare -n patterns_ref="${patterns_ref_name}"
 	local output_var="$5"
 	local patterns_joined=""
-	pipeline_artifact_transfer::join_patterns patterns_ref patterns_joined
+	pipeline_artifact_transfer::join_patterns "${patterns_ref_name}" patterns_joined
 	local tmp_output=""
 	tmp_output=$(mktemp) || return 1
 	local rc=0
@@ -156,7 +156,7 @@ pipeline_artifact_transfer::run_locator() {
 	declare -n patterns_ref="${patterns_ref_name}"
 	local output_var="$6"
 	local patterns_joined=""
-	pipeline_artifact_transfer::join_patterns patterns_ref patterns_joined
+	pipeline_artifact_transfer::join_patterns "${patterns_ref_name}" patterns_joined
 	local tmp_output=""
 	tmp_output=$(mktemp) || return 1
 	local rc=0
@@ -220,12 +220,12 @@ pipeline_artifact_transfer::handle_zero_matches() {
 	local dest_dir="${7:-}"
 	if ssh -o StrictHostKeyChecking=no "root@${node}" "test -d '${look_into}'" 2>/dev/null; then
 		local quick_sum=0
-		pipeline_artifact_transfer::run_quickcheck "${transfer_idx}" "${node}" "${look_into}" patterns_ref quick_sum
+		pipeline_artifact_transfer::run_quickcheck "${transfer_idx}" "${node}" "${look_into}" "${patterns_ref_name}" quick_sum
 		if ((quick_sum > 0)); then
 			log_info "Transfer ${transfer_idx} hint: likely_race_condition (quickcheck/recheck>0 but enumeration=0)."
 			local snapshot_rc=0
 			set +e
-			pipeline_artifact_transfer::run_snapshot_copy "${node}" "${bundle_dir}" "${look_into}" patterns_ref "${dest_dir}"
+			pipeline_artifact_transfer::run_snapshot_copy "${node}" "${bundle_dir}" "${look_into}" "${patterns_ref_name}" "${dest_dir}"
 			snapshot_rc=$?
 			set -e
 			if ((snapshot_rc == 0)); then
@@ -276,8 +276,8 @@ pipeline_artifact_transfer::handle_zero_matches() {
 			fi
 		fi
 		local diag_output=""
-		pipeline_artifact_transfer::run_deep_diag "${node}" "${bundle_dir}" "${look_into}" patterns_ref diag_output
-		pipeline_artifact_logging::log_deep_diag "${transfer_idx}" "${diag_output}" patterns_ref "${look_into}" "${dest_dir}"
+		pipeline_artifact_transfer::run_deep_diag "${node}" "${bundle_dir}" "${look_into}" "${patterns_ref_name}" diag_output
+		pipeline_artifact_logging::log_deep_diag "${transfer_idx}" "${diag_output}" "${patterns_ref_name}" "${look_into}" "${dest_dir}"
 		local alt_dirs=()
 		if [[ ${look_into} == */result ]]; then alt_dirs+=("${look_into%/result}/results"); fi
 		if [[ ${look_into} == */results ]]; then alt_dirs+=("${look_into%/results}/result"); fi
@@ -307,7 +307,7 @@ pipeline_artifact_transfer::handle_zero_matches() {
 				alt_join+="${alt} "
 			done
 			local locator_out=""
-			pipeline_artifact_transfer::run_locator "${node}" "${bundle_dir}" "${alt_join% }" "${exec_dir}" patterns_ref locator_out
+			pipeline_artifact_transfer::run_locator "${node}" "${bundle_dir}" "${alt_join% }" "${exec_dir}" "${patterns_ref_name}" locator_out
 			pipeline_artifact_logging::log_locator "${transfer_idx}" "${locator_out}"
 		fi
 	else
@@ -328,21 +328,21 @@ pipeline_artifact_transfer::handle_transfer() {
 
 	local prescan_output=""
 	set +e
-	pipeline_artifact_transfer::run_prescan "${transfer_idx}" "${node_name}" "${bundle_dir}" "${look_into}" patterns_ref prescan_output
+	pipeline_artifact_transfer::run_prescan "${transfer_idx}" "${node_name}" "${bundle_dir}" "${look_into}" "${patterns_ref_name}" prescan_output
 	local prescan_rc=$?
 	set -e
 	if ((prescan_rc != 0)); then
 		log_warn "Transfer ${transfer_idx}: prescan returned status ${prescan_rc}"
 	fi
-	pipeline_artifact_logging::log_prescan "${transfer_idx}" "${prescan_output}" patterns_ref "${look_into}" "${node_name}"
+	pipeline_artifact_logging::log_prescan "${transfer_idx}" "${prescan_output}" "${patterns_ref_name}" "${look_into}" "${node_name}"
 
 	local quickcheck_total=0
-	pipeline_artifact_transfer::run_quickcheck "${transfer_idx}" "${node_name}" "${look_into}" patterns_ref quickcheck_total
+	pipeline_artifact_transfer::run_quickcheck "${transfer_idx}" "${node_name}" "${look_into}" "${patterns_ref_name}" quickcheck_total
 	log_debug "Transfer ${transfer_idx}: quickcheck total matches=${quickcheck_total}"
 
 	local enum_output=""
 	set +e
-	pipeline_artifact_transfer::run_enumerate "${node_name}" "${bundle_dir}" "${look_into}" patterns_ref enum_output
+	pipeline_artifact_transfer::run_enumerate "${node_name}" "${bundle_dir}" "${look_into}" "${patterns_ref_name}" enum_output
 	local enum_rc=$?
 	set -e
 	case "${enum_rc}" in
@@ -367,7 +367,7 @@ pipeline_artifact_transfer::handle_transfer() {
 	fi
 
 	if ((${#remote_files[@]} == 0)); then
-		pipeline_artifact_transfer::handle_zero_matches "${transfer_idx}" "${node_name}" "${look_into}" patterns_ref "${bundle_dir}" "${exec_dir}" "${dest_dir}"
+		pipeline_artifact_transfer::handle_zero_matches "${transfer_idx}" "${node_name}" "${look_into}" "${patterns_ref_name}" "${bundle_dir}" "${exec_dir}" "${dest_dir}"
 		return
 	fi
 
