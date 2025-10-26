@@ -482,7 +482,7 @@ pipeline_artifact_transfer::process_transfer() {
 	local labels=()
 	pipeline_collector::get_transfer "${transfers_json}" "${transfer_idx}" look_into subfolder labels
 	local patterns=()
-	pipeline_collector::patterns_from_labels rule_map_ref labels patterns
+	pipeline_collector::patterns_from_labels "${rule_map_name}" labels patterns
 	: "${rule_map_ref[@]:-}"
 	: "${labels[@]:-}"
 	: "${patterns[@]:-}"
