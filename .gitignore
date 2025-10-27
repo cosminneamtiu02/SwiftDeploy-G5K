@@ -1,28 +1,11 @@
 # Node.js dependencies (created by pre-commit prettier)
 node_modules/
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
 
 # Pre-commit cache
 .pre-commit-cache/
 
 # IDE files
 .vscode/
-.idea/
-*.swp
-*.swo
-*~
-
-# OS files
-.DS_Store
-Thumbs.db
-
-# Temporary files
-*.tmp
-*.temp
 
 # generated YAMLs for env-creator
 experiments-runner/generated-yamls/
-
-experiments-runner/CHECKLIST.txt
