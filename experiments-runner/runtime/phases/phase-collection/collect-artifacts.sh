@@ -78,7 +78,7 @@ pipeline_collect_artifacts::run() {
 	fi
 
 	local dest_root
-	dest_root="${HOME}/collected/${base_path}"
+	dest_root="${HOME}/public/${base_path}"
 	log_info "Collector destination root: ${dest_root}"
 	pipeline_env::ensure_directory "${dest_root}"
 	if [[ -d ${dest_root} ]]; then

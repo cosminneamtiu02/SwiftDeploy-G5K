@@ -375,25 +375,7 @@ pipeline_artifact_transfer::handle_transfer() {
 	dest_before=$(find "${dest_dir}" -mindepth 1 -maxdepth 1 -printf '.' 2>/dev/null | wc -c | tr -d '[:space:]' || true)
 	log_info "Transfer ${transfer_idx}: ${#remote_files[@]} unique files from ${look_into} -> ${dest_dir}, FE entries before=${dest_before:-0}"
 
-	if [[ ${LOG_LEVEL:-info} == debug ]]; then
-		local limit=$((${#remote_files[@]} < 20 ? ${#remote_files[@]} : 20))
-		local i
-		for ((i = 0; i < limit; i++)); do
-			local fname="${remote_files[i]}"
-			local matches=()
-			local pattern
-			for pattern in "${patterns_ref[@]}"; do
-				if [[ ${fname} == "${pattern}" ]]; then
-					matches+=("${pattern}")
-				fi
-			done
-			if ((${#matches[@]} > 0)); then
-				log_debug "REASON: file '${fname}' selected because it matched patterns: ${matches[*]}"
-			else
-				log_debug "REASON: file '${fname}' selected by remote script but did not match local pattern check (possible shell option mismatch)."
-			fi
-		done
-	fi
+	# Detailed per-file pattern diagnostics removed after verifying transfer correctness.
 
 	local copied=0
 	local failed=0
