@@ -1,4 +1,6 @@
-#Project adiministration rules
+# Project administration rules
+
+* @cosminneamtiu02
 
 README.md @cosminneamtiu02
 CONTRIBUTING.md @cosminneamtiu02
@@ -9,7 +11,6 @@ LICENSE @cosminneamtiu02
 .markdownlint.json @cosminneamtiu02
 .pre-commit-config.yaml @cosminneamtiu02
 .shellcheckrc @cosminneamtiu02
-.shell_paths @cosminneamtiu02
 
 .github/CODEOWNERS @cosminneamtiu02
 .github/labels.yml @cosminneamtiu02
@@ -19,5 +20,4 @@ LICENSE @cosminneamtiu02
 .github/ISSUE_TEMPLATE/config.yml @cosminneamtiu02
 .github/ISSUE_TEMPLATE/feature_request.yml @cosminneamtiu02
 
-.github/workflows/shell-quality.yml @cosminneamtiu02
 .github/workflows/sync-labels.yml @cosminneamtiu02

@@ -1,123 +1,137 @@
 # SwiftDeploy-G5K
 
-[![Shell Quality](https://github.com/cosminneamtiu02/SwiftDeploy-G5K/actions/workflows/shell-quality.yml/badge.svg)](https://github.com/cosminneamtiu02/SwiftDeploy-G5K/actions/workflows/shell-quality.yml)
 [![pre-commit](https://img.shields.io/badge/pre--commit-enabled-brightgreen?logo=pre-commit&logoColor=white)](https://github.com/pre-commit/pre-commit)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-This repository provides an infrastructure for Grid'5000, supporting and accelerating multiple parallel and
-synchronous machine learning trainings. It also includes tools for building images and offers a standardized
-approach for collecting results on the platform.
+SwiftDeploy-G5K is an automation toolkit for [Grid'5000](https://www.grid5000.fr/) experiments. It packages two
+complementary pieces:
 
-## Grid'5000: Setup & Update Guide
+- **Environment creator** – provisions a node, applies your bootstrap script, and captures a reusable image
+  (`.tar.zst` + `.yaml`).
+- **Experiments runner** – orchestrates large experiment batches end-to-end (selection → provisioning → preparation →
+  delegation → collection) with robust logging and artifact harvesting.
 
-Follow these steps to get this project onto a Grid'5000 Frontend (FE) and keep it up to date.
+Together they let you iterate quickly on machine-learning workloads that need reproducible images and repeatable
+execution pipelines.
 
-### 1) Prerequisites
+---
 
-- You have a Grid'5000 account and your SSH key is registered.
-- Replace `YOUR_LOGIN` and `YOUR_SITE` with your own values.
+## 📦 Components at a Glance
 
-### 2) Log in to a Frontend (FE)
+- **Environment creator** (`./env-creator/frontend-controller.sh <config.conf>`): builds a Grid'5000-compatible
+  environment from a config (`env-creator/configs/*.conf`) and a node bootstrap script
+  (`env-creator/node-build-scripts/`). The flow provisions a temporary node, executes your setup script, then saves the
+  compressed image plus its YAML descriptor under `~/envs/`.
+- **Experiments runner** (`./experiments-runner/experiments-controller.sh --config <file>`): schedules parameterised
+  jobs on an allocated node, manages done trackers on the front-end, streams logs, and copies results back according to
+  declarative transfer rules defined in the configuration JSON.
 
-Option A — via the access gateway (recommended):
+Key technologies: strict Bash scripting, `jq` for JSON parsing, `kadeploy3` for image deployment, OpenSSH for
+connectivity, and Grid'5000 conventions for environment management.
 
-```bash
-ssh YOUR_LOGIN@access.grid5000.fr
-# then hop to a site FE (aka "region"), for example:
-ssh YOUR_LOGIN@nancy.grid5000.fr
-```
+---
 
-Option B — direct to a site FE:
+## 🧭 Typical Workflow
 
-```bash
-ssh YOUR_LOGIN@rennes.grid5000.fr
-```
+1. **Capture an environment** on a deploy reservation using the environment creator.
+2. **Describe your experiment batch** in `experiments-runner/experiments-configurations/` and add parameter files under
+   `experiments-runner/params/`.
+3. **Run the controller** from a front-end. It will:
+   - Select the next chunk of pending parameter lines (`phase-selection`).
+   - Provision or redeploy the target node with your saved image (`phase-provisioning`).
+   - Prepare remote folders, env vars, and helper scripts (`phase-preparation`).
+   - Delegate the work in parallel respecting your concurrency caps (`phase-delegation`).
+   - Collect logs/artifacts back to the front-end using glob-based rules (`phase-collection`).
+4. Inspect logs under `experiments-runner/logs/` and downloaded artifacts under `experiments-runner/collected/` (or your
+   custom destination).
 
-Common site FEs:
-grenoble.grid5000.fr, lille.grid5000.fr, luxembourg.grid5000.fr, lyon.grid5000.fr,
-nancy.grid5000.fr, nantes.grid5000.fr, reims.grid5000.fr, rennes.grid5000.fr,
-sophia.grid5000.fr, toulouse.grid5000.fr
+All scripts are idempotent where possible so you can safely retry failed phases.
 
-### 3) Choose a working folder on the FE
+---
 
-Create (or reuse) a workspace directory for this project:
+## ✅ Prerequisites
 
-```bash
-mkdir -p $HOME/work/SwiftDeploy-G5K
-cd $HOME/work/SwiftDeploy-G5K
-```
+- Grid'5000 account with SSH key registered.
+- `kadeploy3`, `tgz-g5k`, and standard GNU utilities on the front-end.
+- `jq`, `base64`, and OpenSSH available locally and remotely.
+- Optional: GNU Parallel on the worker node for faster delegation (falls back to background jobs otherwise).
 
-### 4) Clone this repository (first time)
+---
 
-HTTPS (read-only; works for everyone):
+## 🚀 Quick Start
 
-```bash
-git clone https://github.com/cosminneamtiu02/SwiftDeploy-G5K.git
-cd SwiftDeploy-G5K
-```
-
-If you have push rights and prefer SSH:
-
-```bash
-git remote set-url origin git@github.com:cosminneamtiu02/SwiftDeploy-G5K.git
-```
-
-### 5) Update to the latest version (next times)
-
-From the FE workspace:
+### 1. Build & Capture an Environment
 
 ```bash
-cd $HOME/work/SwiftDeploy-G5K/SwiftDeploy-G5K
-git pull --ff-only
+# Reserve a deployment node (pick the queue/cluster you need)
+oarsub -I -t deploy -q default
+
+# From inside the repo checkout
+chmod +x env-creator/frontend-controller.sh
+./env-creator/frontend-controller.sh csnn-ckplus-3d-CN.conf
 ```
 
-If you have local edits and want to keep them:
+The script deploys the base OS, pushes your setup script, collects the resulting `~/envs/img/<NAME>.tar.zst` and
+`~/envs/img-files/<NAME>.yaml`, and cleans up temporary markers.
+
+### 2. Run a Batch of Experiments
 
 ```bash
-git stash
-git pull --ff-only
-git stash pop
+export G5K_USER=<login>
+export G5K_HOST=<node.your-site.grid5000.fr>
+export G5K_SSH_KEY=~/.ssh/id_rsa
+
+# Optional overrides (defaults shown)
+export PARAMS_BASE="$(pwd)/experiments-runner/params"
+export COLLECTED_BASE="$(pwd)/experiments-runner/collected"
+
+./experiments-runner/experiments-controller.sh --config csnn-faces.json --verbose
 ```
 
-### 6) One-liner: clone if missing, otherwise update
+The controller streams logs into `experiments-runner/logs/<timestamp>/` while the remote node receives a structured
+layout under `~/experiments_node/on-machine/`.
 
-Run this in your workspace directory:
+---
 
-```bash
-cd $HOME/work/SwiftDeploy-G5K
-if [ -d SwiftDeploy-G5K/.git ]; then
-  git -C SwiftDeploy-G5K pull --ff-only
-else
-  git clone https://github.com/cosminneamtiu02/SwiftDeploy-G5K.git
-fi
-```
+## 🧾 Configuration Cheat Sheet
 
-### 7) (Optional) Keep per-site work separated
+- `running_experiments.on_fe.to_do_parameters_list_path` – absolute or repo-relative path to the parameter file (one
+  experiment per line). Completed lines are tracked separately to avoid reruns.
+- `running_experiments.on_machine.full_path_to_executable` – remote working directory or binary path; must exist in the
+  captured image.
+- `running_experiments.on_machine.execute_command` – command invoked for each parameter line (receives the line as the
+  last argument).
+- `running_experiments.number_of_experiments_to_run_in_parallel_on_machine` – controls concurrency for the delegation
+  phase.
+- `running_experiments.experiments_collection` – optional object describing how to glob files on the node and where to
+  copy them back on the front-end.
+- `machine_setup.image_to_use` – YAML descriptor produced by the environment creator.
+- `machine_setup.env_variables_list` – list of environment variables to persist on the remote machine before execution.
 
-If you work across multiple sites, you can keep a per-site folder:
+See `experiments-runner/experiments-configurations/TEMPLATE.json` for a fully annotated example and
+`experiments-runner/experiments-configurations/implementations/` for concrete workloads.
 
-```bash
-export G5K_SITE=nancy
-mkdir -p $HOME/work/$G5K_SITE/SwiftDeploy-G5K
-cd $HOME/work/$G5K_SITE/SwiftDeploy-G5K
-# then clone/update as above
-```
+---
 
-## Contributing
+## 🗂️ Repository Layout
 
-We welcome contributions! 🎉
+- `env-creator/` – scripts and configs used to build reusable Grid'5000 environments.
+- `experiments-runner/` – multi-phase pipeline that schedules, runs, and gathers results for experiment batches.
+- `.github/` – issue/PR templates and automation.
+- `.tools/` – wrappers required by pre-commit hooks (e.g., `shfmt`).
+- `.vscode/` – optional editor tasks.
 
-Please read the [Contributing Guide](./CONTRIBUTING.md) for setup instructions, coding standards, and our pull request workflow.
+---
 
-**Quick start for contributors:**
+## 🤝 Contributing
 
-```bash
-# Install pre-commit for automatic code quality checks
-pip install pre-commit
-pre-commit install
+- Install hooks: `pipx install pre-commit` (or `pip install pre-commit`) then `pre-commit install`.
+- Run the full suite before committing: `pre-commit run --all-files`.
+- Please read the refreshed [Contributing Guide](./CONTRIBUTING.md) for coding standards, review expectations, and
+  troubleshooting tips.
 
-# Test your setup
-pre-commit run --all-files
-```
+---
 
-Please message me on LinkedIn, so I can add you to the project. Link in my bio to LinkedIn.
+## 📄 License
+
+Distributed under the [MIT License](./LICENSE).

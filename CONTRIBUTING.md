@@ -1,190 +1,79 @@
 # Contributing Guide
 
-[![Shell Quality](https://github.com/cosminneamtiu02/SwiftDeploy-G5K/actions/workflows/shell-quality.yml/badge.svg)](https://github.com/cosminneamtiu02/SwiftDeploy-G5K/actions/workflows/shell-quality.yml)
-[![pre-commit](https://img.shields.io/badge/pre--commit-enabled-brightgreen?logo=pre-commit&logoColor=white)](https://github.com/pre-commit/pre-commit)
-
-Thanks for contributing! 🎉
-
-This project enforces strict code quality standards using **pre-commit hooks** and **GitHub Actions**.
-Following this guide will help you get set up and avoid CI failures.
-
-## What is Pre-commit?
-
-**Pre-commit** automatically runs quality checks on your code **before** each commit, ensuring:
-
-- **Code formatting** is consistent (YAML, Markdown)
-- **No trailing whitespace** or missing newlines
-- **Shell scripts** are properly formatted and linted
-- **YAML files** are valid (workflows, configs)
-- **Markdown** follows style guidelines
-- **No large files** or merge conflicts
-
-If any check fails, the commit is blocked until you fix the issues. Many problems are **auto-fixed** for you!
+Thanks for helping improve **SwiftDeploy-G5K**! This document summarises how to get ready, what the project expects, and
+how to propose changes without breaking the automation pipeline.
 
 ---
 
-## Local Setup
-
-### 1) Clone the repository
+## 🛠️ Getting Set Up
 
 ```bash
 git clone https://github.com/cosminneamtiu02/SwiftDeploy-G5K.git
 cd SwiftDeploy-G5K
+
+# Install the pre-commit runner (pick your favourite package manager)
+pipx install pre-commit        # recommended
+
+# or: pip install pre-commit
+
+pre-commit install            # install the git hook
+pre-commit run --all-files    # optional sanity check
 ```
 
-### 2) Install pre-commit (choose one)
+The hooks format Markdown/YAML, run `shellcheck` + `shfmt`, and guard against common git mistakes (merge conflicts,
+oversized files, mixed line endings, etc.).
 
-```bash
-# Using pip
-pip install pre-commit
+---
 
-# Using pipx (recommended)
-pipx install pre-commit
+## ✍️ Making Changes
 
-# Using homebrew (macOS)
-brew install pre-commit
+- **Scripts** should follow the existing style: `#!/usr/bin/env bash`, `set -euo pipefail`, helper functions under
+ `runtime/common/`, and logging helpers from `logging.sh`.
+- **Configuration** (JSON/YAML) must stay machine-editable: keep keys sorted, prefer comments in adjacent Markdown.
+- **Documentation**: keep sentences short, prefer task-oriented steps, and cross-link files with relative paths.
+- **Commit messages**: favour the conventional `type: summary` style when possible (`feat:`, `fix:`, `docs:`...).
 
-# Using apt (Ubuntu/Debian)
-sudo apt install pre-commit
-```
-
-### 3) Enable pre-commit hooks
-
-```bash
-pre-commit install
-```
-
-### 4) Test the setup (optional but recommended)
+Before committing, always run:
 
 ```bash
 pre-commit run --all-files
 ```
 
-This will run all quality checks on your entire codebase and auto-fix many issues.
+If hooks auto-fix a file, stage the changes and run again until everything passes.
 
 ---
 
-## Development Workflow
+## 🔬 Validating Your Change
 
-### 1) Make changes
-
-Edit files as needed. Pre-commit will automatically check:
-
-- **Markdown files** (`.md`) - formatting and style
-- **YAML files** (`.yml`, `.yaml`) - syntax and formatting
-- **Shell scripts** (`.sh`, `.bash`) - shellcheck linting and shfmt formatting
-- **All files** - trailing whitespace, end-of-file newlines, large files
-
-### 2) Commit your changes
-
-```bash
-git add .
-git commit -m "your descriptive message"
-```
-
-**What happens during commit:**
-
-- Pre-commit runs automatically
-- Many issues are **auto-fixed** (formatting, whitespace, etc.)
-- If auto-fixes are made, you'll need to stage and commit again
-- If unfixable issues exist, commit is blocked until you fix them
-
-### 3) Push and open a Pull Request
-
-```bash
-git push origin your-branch-name
-```
-
-### 4) CI runs automatically
-
-- **pre-commit.ci**: Runs the same checks online
-- **Shell Quality workflow**: Additional shell script validation
-- All checks must pass before merging
-
-### 5) Address any feedback
-
-Fix issues raised by pre-commit, CI, or code reviewers, then push updates.
+- For environment creator tweaks: test against a deployment reservation when feasible and paste the relevant command in
+ your PR description.
+- For experiments runner updates: run a dry-run (`--verbose`) or a small parameter batch and attach the last few log
+ lines proving success.
+- When touching docs or configs only, the pre-commit suite is usually sufficient—but mention that in the PR.
 
 ---
 
-## Common Pre-commit Scenarios
+## 🧾 Opening Pull Requests
 
-### ✅ Everything works smoothly
-
-```bash
-git commit -m "Add new feature"
-# Pre-commit runs, everything passes
-# Commit succeeds
-```
-
-### 🔧 Auto-fixes applied
-
-```bash
-git commit -m "Update documentation"
-# Pre-commit fixes formatting issues automatically
-# You'll see: "files were modified by this hook"
-git add .  # Stage the auto-fixes
-git commit -m "Update documentation"  # Commit again
-```
-
-### ❌ Manual fixes needed
-
-```bash
-git commit -m "Add shell script"
-# Pre-commit finds shellcheck errors
-# Fix the reported issues in your files
-git add .
-git commit -m "Add shell script"  # Try again
-```
-
-### 🚀 Skip pre-commit (emergency only)
-
-```bash
-git commit -m "Urgent hotfix" --no-verify
-# Only use in emergencies - CI will still catch issues
-```
+- Complete the PR template checklist so reviewers know which validations were performed.
+- Link related issues (e.g. `Closes #42`).
+- Keep diffs focused; if you need to reformat unrelated files, do it in a dedicated commit.
+- Expect reviewers to request one green pipeline run (`pre-commit.ci`) before merging.
 
 ---
 
-## Troubleshooting
+## 🐞 Filing Issues
 
-### Pre-commit is too slow
-
-```bash
-# Run only on changed files (default behavior)
-git commit -m "your message"
-
-# Skip specific hooks if needed
-SKIP=actionlint git commit -m "your message"
-```
-
-### Reset pre-commit environment
-
-```bash
-pre-commit clean
-pre-commit install --install-hooks
-```
-
-### Update pre-commit hooks
-
-```bash
-pre-commit autoupdate
-```
+- Use the provided templates so triage can happen quickly.
+- For bug reports include: configuration JSON, parameter snippet, Grid'5000 site, relevant log excerpts.
+- For feature requests specify whether the change affects the environment creator, experiments runner, or documentation.
 
 ---
 
-## Contribution Checklist
+## 🙋 Need Help?
 
-- [ ] I ran `pre-commit install` to set up hooks
-- [ ] I tested my changes with `pre-commit run --all-files`
-- [ ] All auto-fixes have been committed
-- [ ] All pre-commit checks pass locally
-- [ ] CI shows green checkmarks for all required checks
+- Read `.pre-commit-config.yaml` to understand the enforced checks.
+- Join the LinkedIn contact listed in the repository if you need maintainer assistance.
+- Otherwise, open an issue and describe the problem plus the context (front-end vs. node, targeted command, etc.).
 
----
-
-## Questions?
-
-- Check the [pre-commit documentation](https://pre-commit.com/)
-- Look at `.pre-commit-config.yaml` to see what checks are enabled
-- Open an issue if you need help with setup
+Happy hacking! 🚀
