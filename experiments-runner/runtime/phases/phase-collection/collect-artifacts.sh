@@ -42,37 +42,12 @@ pipeline_collect_artifacts::run() {
 	local base_path=""
 	local rules_json=""
 	local transfers_json=""
-	local base_path_raw=""
-	base_path_raw=$(jq -r '.running_experiments.experiments_collection.base_path // ""' "${config_path}" 2>/dev/null || printf '')
-	log_debug "Collector diagnostics: raw base_path=$(printf '%q' "${base_path_raw}") length=${#base_path_raw}"
 	pipeline_collector::load_config "${config_path}" base_path rules_json transfers_json
-	log_debug "Collector diagnostics: sanitized base_path=$(printf '%q' "${base_path}") length=${#base_path}"
-	log_debug "Collector diagnostics: lookup_rules JSON=${rules_json}"
-	log_debug "Collector diagnostics: ftransfers JSON=${transfers_json}"
-	local base_path_trimmed=false
-	local base_path_sanitized_empty=false
-	if [[ ${base_path_raw} != "${base_path}" ]]; then
-		base_path_trimmed=true
-		log_info "Collector diagnostics: base_path trimmed from $(printf '%q' "${base_path_raw}") to $(printf '%q' "${base_path}")"
-	fi
-	if [[ -n ${base_path_raw} && -z ${base_path} ]]; then
-		base_path_sanitized_empty=true
-		log_warn "Collector diagnostics: base_path contained only whitespace/control characters after sanitization."
-	fi
 	pipeline_collector::validate_config "${base_path}" "${rules_json}" "${transfers_json}"
 
 	if [[ -z ${base_path} ]]; then
 		log_info 'No collection base_path defined; skipping artifact transfer.'
-		if [[ -z ${base_path_raw} ]]; then
-			log_warn 'Artifact collection disabled because .running_experiments.experiments_collection.base_path is missing or empty in the config.'
-		elif ${base_path_sanitized_empty}; then
-			log_warn "Artifact collection disabled because base_path sanitized to empty. Raw value=$(printf '%q' "${base_path_raw}")."
-		elif ${base_path_trimmed}; then
-			log_warn "Artifact collection disabled after trimming base_path (result empty). Verify config for stray whitespace or invisible characters."
-		else
-			log_warn 'Artifact collection disabled despite non-empty raw value; check earlier validation errors.'
-		fi
-		log_info "Collector diagnostics: config path ${config_path}"
+		log_warn 'Artifact collection disabled because .running_experiments.experiments_collection.base_path is missing or invalid.'
 		pipeline_artifact_state::write "${state_file}" 'COLLECTION_SKIPPED=1'
 		return 0
 	fi
@@ -81,11 +56,6 @@ pipeline_collect_artifacts::run() {
 	dest_root="${HOME}/public/${base_path}"
 	log_info "Collector destination root: ${dest_root}"
 	pipeline_env::ensure_directory "${dest_root}"
-	if [[ -d ${dest_root} ]]; then
-		log_debug "Collector diagnostics: destination root exists (post-ensure)."
-	else
-		log_warn "Collector diagnostics: destination root missing after ensure_directory."
-	fi
 
 	declare -A rule_map=()
 	pipeline_collector::build_rule_map "${rules_json}" rule_map
@@ -109,7 +79,6 @@ pipeline_collect_artifacts::run() {
 
 	local idx
 	for ((idx = 0; idx < transfer_total; idx++)); do
-		log_debug "Collector diagnostics: processing transfer index ${idx}"
 		pipeline_artifact_transfer::process_transfer "${idx}" "${node_name}" "${dest_root}" "${exec_dir}" "${bundle_dir}" rule_map "${transfers_json}"
 	done
 

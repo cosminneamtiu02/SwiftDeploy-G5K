@@ -68,9 +68,7 @@ collector::load_config() {
 	local rules_json_value
 	local transfers_json_value
 	base_path_raw=$(jq -r '.running_experiments.experiments_collection.base_path // empty' "${config_path}" 2>/dev/null || printf '')
-	log_debug "collector::load_config raw base_path=$(printf '%q' "${base_path_raw}") length=${#base_path_raw}"
 	normalized_base_path=$(collector::__normalize_scalar "${base_path_raw}")
-	log_debug "collector::load_config normalized base_path=$(printf '%q' "${normalized_base_path}") length=${#normalized_base_path}"
 	if [[ -n ${base_path_raw} && -z ${normalized_base_path} ]]; then
 		log_warn "collector::load_config: sanitized base_path resolved empty; using raw value"
 		normalized_base_path="${base_path_raw}"
@@ -203,15 +201,6 @@ collector::get_transfer() {
 		mapfile -t look_for_list <<<"${look_for_output}"
 	fi
 	collector::__set_array "${look_for_var}" "${look_for_list[@]}"
-	local debug_labels=""
-	if ((${#look_for_list[@]} > 0)); then
-		local __collector_label
-		for __collector_label in "${look_for_list[@]}"; do
-			debug_labels+="$(printf '%q' "${__collector_label}") "
-		done
-		debug_labels=${debug_labels% }
-	fi
-	log_debug "collector::get_transfer idx=${index} look_into=$(printf '%q' "${look_into_value}") subfolder=$(printf '%q' "${subfolder_value}") labels=${debug_labels:-<none>}"
 }
 
 collector::patterns_from_labels() {
