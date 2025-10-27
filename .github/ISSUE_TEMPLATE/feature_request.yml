@@ -1,11 +1,23 @@
 name: "✨ Feature request"
 description: Suggest an idea or improvement
 title: "feat: <short description>"
-labels: ["feature", "not implemented"]
-assignees:
-  - cosminneamtiu02
+labels: ["feature"]
 
 body:
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected Area
+      description: Which part of the project does this request target?
+      options:
+        - Experiments runner
+        - Environment creator
+        - Documentation / guides
+        - Tooling / automation
+        - Unsure
+    validations:
+      required: true
+
   - type: textarea
     id: problem
     attributes:
@@ -21,6 +33,12 @@ body:
       description: Describe the feature or change you’d like to see.
     validations:
       required: true
+
+  - type: textarea
+    id: success
+    attributes:
+      label: Success Criteria
+      description: How will we know this feature is done? Describe measurable outcomes.
 
   - type: textarea
     id: alternatives

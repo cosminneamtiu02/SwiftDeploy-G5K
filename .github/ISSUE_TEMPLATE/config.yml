@@ -3,12 +3,12 @@ blank_issues_enabled: false
 issue_templates:
   - name: "🐛 Bug report"
     description: Report something that isn't working as expected
-    labels: ["bug", "not fixed"]
+    labels: ["bug"]
     assignees: ["cosminneamtiu02"]
     file: bug_report.yml
 
   - name: "✨ Feature request"
     description: Suggest an idea or improvement
-    labels: ["feature", "not implemented"]
+    labels: ["feature"]
     assignees: ["cosminneamtiu02"]
     file: feature_request.yml

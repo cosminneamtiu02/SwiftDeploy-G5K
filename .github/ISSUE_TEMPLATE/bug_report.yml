@@ -1,11 +1,23 @@
 name: "🐛 Bug report"
 description: Report something that isn't working as expected
 title: "bug: <short description>"
-labels: ["bug", "not fixed"]
-assignees:
-  - cosminneamtiu02
+labels: ["bug"]
 
 body:
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected Area
+      description: Where does the bug occur?
+      options:
+        - Experiments runner
+        - Environment creator
+        - Documentation / guides
+        - Tooling / automation
+        - Unsure
+    validations:
+      required: true
+
   - type: textarea
     id: summary
     attributes:
@@ -42,21 +54,6 @@ body:
       description: What actually happened? (logs, screenshots, etc.)
     validations:
       required: true
-
-  - type: dropdown
-    id: status
-    attributes:
-      label: Bug Status
-      description: Track the current status of this bug.
-      options:
-        - not fixed
-        - fixed
-        - in progress
-        - blocked
-        - requires info
-        - done
-    validations:
-      required: false
 
   - type: textarea
     id: env
