@@ -1,0 +1,163 @@
+#!/usr/bin/env bash
+set -euo pipefail
+IFS=$'\n\t'
+
+# -------- HARDCODED FOLDERS (repo-relative) --------
+# Resolve repository root (one level up from this script)
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+CONFIGS_DIR="${REPO_ROOT}/env-creator/configs"
+NODE_SCRIPT_DIR="${REPO_ROOT}/env-creator/node-build-scripts"
+DEPLOYED_NODE_FILE="${REPO_ROOT}/env-creator/current_deployed_node.txt"
+
+# -------- USER INPUT --------
+CONFIG_FILE="${1:-}" # e.g., csnn_ckplus.conf
+
+if [[ -z ${CONFIG_FILE} ]]; then
+	echo "Usage: $0 <config_file>"
+	exit 1
+fi
+
+CONFIG_PATH="${CONFIGS_DIR}/${CONFIG_FILE}"
+
+if [[ ! -f ${CONFIG_PATH} ]]; then
+	echo "Error: Config file ${CONFIG_PATH} not found."
+	exit 1
+fi
+
+# Load config variables (dynamic path; suppress SC1090)
+# shellcheck source=/dev/null
+source "${CONFIG_PATH}"
+
+# Validate required variables sourced from the config
+: "${GENERAL_NAME:?Missing GENERAL_NAME in ${CONFIG_PATH}}"
+: "${SETUP_SCRIPT:?Missing SETUP_SCRIPT in ${CONFIG_PATH}}"
+: "${OS_NAME:?Missing OS_NAME in ${CONFIG_PATH}}"
+: "${YAML_NAME:?Missing YAML_NAME in ${CONFIG_PATH}}"
+: "${YAML_ALIAS:?Missing YAML_ALIAS in ${CONFIG_PATH}}"
+: "${YAML_DESCRIPTION:?Missing YAML_DESCRIPTION in ${CONFIG_PATH}}"
+: "${YAML_AUTHOR:?Missing YAML_AUTHOR in ${CONFIG_PATH}}"
+
+# -------- DERIVED VARIABLES (from sourced config) --------
+# TAR file path (under user's home in dedicated img folder)
+TAR_BASE_DIR="${HOME}/envs/img"
+TAR_FILE="${TAR_BASE_DIR}/${GENERAL_NAME}.tar.zst"
+# Directory where generated YAML files will be stored. Can be overridden by
+# setting YAML_OUTPUT_DIR in the environment before running this script.
+# Default is ${HOME}/envs/img-files so that deployment uses kadeploy3 -a from there.
+YAML_OUTPUT_DIR="${YAML_OUTPUT_DIR:-${HOME}/envs/img-files}"
+YAML_FILE="${YAML_OUTPUT_DIR}/${GENERAL_NAME}.yaml"
+LOCAL_SCRIPT_PATH="${NODE_SCRIPT_DIR}/${SETUP_SCRIPT}"
+
+# Ensure the TAR directory and YAML output directory exist (relative to home)
+mkdir -p "${TAR_BASE_DIR}"
+mkdir -p "${YAML_OUTPUT_DIR}"
+
+# -------- PRE-CHECK 1: Clean up leftover node file if present --------
+if [[ -f ${DEPLOYED_NODE_FILE} ]]; then
+	echo "Warning: Found leftover ${DEPLOYED_NODE_FILE} — deleting it."
+	rm -f "${DEPLOYED_NODE_FILE}"
+fi
+
+# -------- PRE-CHECK 2: Update-in-create behavior --------
+if [[ -f ${TAR_FILE} || -f ${YAML_FILE} ]]; then
+	echo "Detected existing artifacts for ${GENERAL_NAME}:"
+	[[ -f ${TAR_FILE} ]] && echo " - TAR:  ${TAR_FILE}"
+	[[ -f ${YAML_FILE} ]] && echo " - YAML: ${YAML_FILE}"
+	read -r -p "They already exist. Do you want to update (recreate) them? [y/N]: " REPLY
+	REPLY=${REPLY:-}
+	if [[ ${REPLY} =~ ^[Yy]$ ]]; then
+		echo "Updating image: removing old artifacts..."
+		[[ -f ${TAR_FILE} ]] && rm -f -- "${TAR_FILE}"
+		[[ -f ${YAML_FILE} ]] && rm -f -- "${YAML_FILE}"
+	else
+		echo "ERROR: Image artifacts already exist and were not overwritten. Aborting."
+		exit 1
+	fi
+fi
+
+if [[ ! -f ${LOCAL_SCRIPT_PATH} ]]; then
+	echo "Error: Setup script file ${LOCAL_SCRIPT_PATH} not found."
+	exit 1
+fi
+
+# -------- STEP 1: Deploy OS image --------
+echo "Starting deployment of ${OS_NAME}..."
+if ! deploy_output=$(kadeploy3 "${OS_NAME}" 2>&1); then
+	echo "Deployment failed."
+	echo "${deploy_output}"
+	exit 1
+fi
+
+# Capture last node name from kadeploy3 output
+node_name=$(printf '%s\n' "${deploy_output}" | tail -n 1 | awk '{print $1}')
+if [[ -z ${node_name} ]]; then
+	echo "Failed to extract machine name from deployment output."
+	exit 1
+fi
+
+# Save node name persistently
+echo "${node_name}" >"${DEPLOYED_NODE_FILE}"
+echo "Captured and saved machine name to ${DEPLOYED_NODE_FILE}: ${node_name}"
+
+# -------- STEP 2: Copy setup script to node --------
+echo "Copying script to ${node_name}:/root/${SETUP_SCRIPT}..."
+if ! scp "${LOCAL_SCRIPT_PATH}" "root@${node_name}:/root/${SETUP_SCRIPT}"; then
+	echo "Failed to copy script."
+	exit 1
+fi
+
+remote_script_path="/root/${SETUP_SCRIPT}"
+
+# -------- STEP 3: SSH into node and block --------
+echo "Running script on ${node_name} (blocking terminal)..."
+if ! ssh "root@${node_name}" bash -- "${remote_script_path}"; then
+	echo "Script failed on remote node."
+	exit 1
+fi
+
+# -------- STEP 4: Remove script from node --------
+echo "Removing script from ${node_name}..."
+if ! ssh "root@${node_name}" rm -- "${remote_script_path}"; then
+	echo "Warning: Failed to remove script from remote node."
+fi
+
+# -------- STEP 5: Archive environment --------
+echo "Running tgz-g5k..."
+if ! tgz-g5k -m "${node_name}" -f "${TAR_FILE}"; then
+	echo "Failed to archive environment image."
+	exit 1
+fi
+
+# -------- CLEANUP: Delete node file --------
+echo "Cleaning up ${DEPLOYED_NODE_FILE} after tgz-g5k step..."
+rm -f "${DEPLOYED_NODE_FILE}"
+
+# -------- STEP 6: Generate YAML --------
+echo "Generating ${YAML_FILE}..."
+# Ensure output directory exists and is writable
+if [[ ! -d ${YAML_OUTPUT_DIR} ]]; then
+	echo "Creating YAML output directory ${YAML_OUTPUT_DIR}..."
+	mkdir -p "${YAML_OUTPUT_DIR}"
+fi
+
+if [[ ! -w ${YAML_OUTPUT_DIR} ]]; then
+	echo "ERROR: YAML output directory ${YAML_OUTPUT_DIR} is not writable."
+	exit 1
+fi
+
+echo "Generating ${YAML_FILE}..."
+if ! kaenv3 -p "${OS_NAME}" -u deploy >"${YAML_FILE}"; then
+	echo "Failed to generate YAML environment file."
+	exit 1
+fi
+
+# -------- STEP 7: Apply sed modifications --------
+echo "Applying YAML modifications..."
+sed -i "/^name:/c\name: ${YAML_NAME}" "${YAML_FILE}"
+sed -i "/^alias:/c\alias: ${YAML_ALIAS}" "${YAML_FILE}"
+sed -i "/^description:/c\description : ${YAML_DESCRIPTION}" "${YAML_FILE}"
+sed -i "/^author:/c\author: ${YAML_AUTHOR}" "${YAML_FILE}"
+# Update the file: entry to point to the actual TAR file path in ${HOME}/envs/img
+sed -i "/^\s*file:/c\  file: ${TAR_FILE}" "${YAML_FILE}"
+
+echo "Script finished successfully."

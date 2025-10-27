@@ -1,0 +1,96 @@
+# Grid'5000 CSNN Image Setup
+
+This script automates:
+- Deploying a fresh OS image
+- Running your setup script on the node
+- Saving the node as a reusable environment (`.tar.zst` + `.yaml`)
+
+---
+
+## Setup
+
+Before running, **you must manually reserve a node**:
+cd SwiftDeploy-G5K
+oarsub -I -t deploy -q default
+
+This opens an interactive session with an allocated node.
+
+---
+
+## Running the Controller
+
+Make the script executable:
+chmod +x env-creator/frontend-controller.sh
+
+Run the controller:
+./env-creator/frontend-controller.sh csnn-ckplus-3d-CN.conf
+
+---
+
+## How It Works
+
+- **Reads configuration** from:
+  env-creator/configs/<config_file>.conf
+
+- **Deploys the OS image** using:
+  kadeploy3 <OS_NAME>
+
+- **Copies and executes your setup script** (must be placed in `node-build-scripts/`) on the node
+
+- **Archives the environment** into:
+  ~/envs/img/<GENERAL_NAME>.tar.zst
+
+- **Generates a YAML environment description** as:
+  ~/envs/img-files/<GENERAL_NAME>.yaml
+
+- You can later redeploy this saved environment with:
+  kadeploy3 -a ~/envs/img-files/<GENERAL_NAME>.yaml
+
+
+## Outputs
+
+- Compressed environment image:
+  ~/envs/img/<GENERAL_NAME>.tar.zst
+
+- YAML environment description:
+  ~/envs/img-files/<GENERAL_NAME>.yaml
+
+
+## Important Notes
+
+- The **node setup script** referenced in the config must live under:
+  env-creator/node-build-scripts/
+
+- You must run the controller **inside the interactive session** started with `oarsub`.
+
+- The script automatically cleans up the temporary node tracking file after use.
+
+- Redeploy the saved environment later:
+  kadeploy3 -a ~/envs/img-files/<GENERAL_NAME>.yaml
+
+
+## Example Run
+
+cd ~
+oarsub -I -t deploy -q default
+
+chmod +x env-creator/frontend-controller.sh
+
+./env-creator/frontend-controller.sh csnn-ckplus-3d-CN.conf
+
+---
+
+## Quick Recap
+
+Step:
+- Reserve a node:
+  oarsub -I -t deploy -q default
+
+- Make the controller script executable:
+  chmod +x env-creator/frontend-controller.sh
+
+- Run the controller with a config:
+  ./env-creator/frontend-controller.sh csnn-ckplus-3d-CN.conf
+
+- Redeploy the saved environment later:
+  kadeploy3 -a ~/envs/img-files/<GENERAL_NAME>.yaml

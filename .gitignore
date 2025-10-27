@@ -21,5 +21,11 @@ Thumbs.db
 # Temporary files
 *.tmp
 *.temp
-# generated YAMLs for g5k_env_creator
+
+# generated YAMLs for env-creator
 experiments-runner/generated-yamls/
+
+experiments-runner/CHECKLIST.txt
+
+# Local debug notes
+debigging.txt

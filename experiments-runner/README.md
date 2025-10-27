@@ -7,38 +7,41 @@ This subproject automates Grid'5000 experiment workflows:
 3. Experiment delegation (parallel, tracked, live logs)
 4. Results collection
 
-## Live Progress Checklist
-
-- [x] Create directory tree and placeholders
-- [x] Implement lib utilities (logging, JSON, remote, OS detect)
-- [x] Author _TEMPLATE.json and csnn-faces.json example
-- [x] Implement manual-machine-start.sh and automatic-machine-start.sh (stubbed)
-- [x] Implement prepare-remote-structure.sh + node-setup scripts
-- [x] Implement experiments-delegator (FE + machine) incl. tracker logic & parallel exec
-- [x] Implement csnn_collection.sh collection strategy
-- [x] Implement experiments-controller.sh orchestrator
-- [x] Write README.md with full usage & troubleshooting (expand)
-- [x] Smoke tests (dry-run + happy path)
-
 ## Architecture overview
 
 ```text
-experiments-controller.sh (orchestrator)
- ├─ machine-instantiator/
- │    ├─ manual-machine-start.sh (validate SSH to target)
- │    └─ automatic-machine-start.sh (stub: exits 2)
- ├─ project-preparation/
- │    ├─ prepare-remote-structure.sh (create ~/experiments_node/*, upload on-machine scripts)
- │    └─ node-setup/
- │         ├─ write-env.sh (persist env vars)
- │         └─ install-dependencies.sh (apt/yum/dnf)
- ├─ experiments-delegator/
- │    ├─ on-fe/experiments-delegator.sh (select params, upload commands, stream logs)
- │    ├─ on-fe/utils-params-tracker.sh (tracker management)
- │    └─ on-machine/run-batch.sh (parallel exec; GNU parallel or fallback)
- └─ experiments-collector/
-     └─ on-machine/csnn_collection.sh (concat *.txt → collected_results.txt)
-```
+experiments-controller.sh (front-end orchestrator)
+ ├─ bin/
+ │    ├─ common/
+ │    │    ├─ environment.sh      # shared path + logging bootstrap
+ │    │    ├─ logging.sh          # thin wrapper around liblog
+ │    │    └─ collector.sh        # JSON parsing + validation helpers
+ │    ├─ selection/select_batch.sh
+ │    ├─ provisioning/provision_machine.sh
+ │    ├─ preparation/prepare_project_assets.sh
+ │    ├─ execution/delegate_experiments.sh
+ │    └─ collection/collect_artifacts.sh # shim -> pipeline/phase-collection
+ │
+ └─ pipeline/
+   ├─ common/
+   │    ├─ general-environment/environment.sh
+   │    ├─ general-logging/logging.sh
+   │    ├─ general-collector/
+   │    │    ├─ artifact-collector-bundle.sh
+   │    │    ├─ artifact-collector-logging.sh
+   │    │    ├─ artifact-collector-transfer.sh
+   │    │    ├─ collector-config.sh
+   │    │    ├─ artifact-state.sh
+   │    │    └─ file-transfer.sh
+   │    └─ general-remote/remote.sh
+   └─ phases/
+     └─ phase-collection/
+       ├─ collect-artifacts.sh
+       └─ remote-tools/
+         ├─ pre-scan.sh | enumerate.sh | deep-diag.sh
+         ├─ locator.sh (alt-path discovery)
+         └─ snapshot.sh (tar stream for racey outputs)
+ └─ logs/
 
 Remote layout on the target machine (created under the user’s home):
 
@@ -48,8 +51,9 @@ Remote layout on the target machine (created under the user’s home):
   executables/   # optional helper binaries/scripts
   results/       # experiment outputs
   logs/          # per-job logs (job_N.out/err)
-  collection/    # collection strategies (e.g., csnn_collection.sh)
   bootstrap/     # commands.pending, setup helpers
+
+Collector remote tools are uploaded per run under `/tmp/swiftdeploy_pipeline_<user>_<pid>/`.
 ```
 
 ## Prerequisites
@@ -72,51 +76,30 @@ ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -i "$G5K_SSH_KEY" "$G5K
 
 ## Quick start
 
-1. Prepare a config JSON in `experiments-configurations/` (copy `_TEMPLATE.json` → `my-exp.json` or use `csnn-faces.json`).
+1. Prepare a config JSON in `experiments-configurations/`.
+  Copy `_TEMPLATE.json` to `my-exp.json` or start from `csnn-faces.json`.
 2. Export environment variables `G5K_USER`, `G5K_HOST`, `G5K_SSH_KEY`.
-3. Dry-run all phases (no side effects):
+3. Launch the full workflow (selection → instantiation → preparation → delegation → collection):
 
 ```bash
-./experiments-runner/experiments-controller.sh --config csnn-faces.json --dry-run --verbose
+./experiments-runner/experiments-controller.sh --config csnn-faces.json --verbose
 ```
 
-Run specific phases (comma-separated):
-
-```bash
-./experiments-runner/experiments-controller.sh --config my-exp.json --phases prepare,delegate
-```
-
-Disable live log streaming (still writes to files):
-
-```bash
-./experiments-runner/experiments-controller.sh --config my-exp.json --no-live-logs
-```
-
-Force manual instantiation script (default is manual unless config says otherwise):
-
-```bash
-./experiments-runner/experiments-controller.sh --config my-exp.json --manual
-```
-
-Logs are written to `experiments-runner/logs/<timestamp>/` and symlinked as `experiments-runner/logs/last-run`.
+Logs stream to `experiments-runner/logs/`. Each phase appends to dedicated
+`*.log` files inside the folder. State snapshots for troubleshooting reside under
+`logs/controller_state.*` during the run and are cleaned up automatically on
+success.
 
 ## Controller CLI
 
 ```bash
-./experiments-runner/experiments-controller.sh --config <FILENAME.json> [options]
+./experiments-runner/experiments-controller.sh --config <FILENAME.json> [--verbose]
 
-Options:
- -c, --config <filename>     Filename under experiments-configurations/ (required)
- -p, --phases <list>         instantiate,prepare,delegate,collect (default: all)
-   --dry-run               Print commands without executing
-   --verbose               More debug output
-   --continue-on-error     Do not stop after a failed phase
-   --manual                Force manual instantiation script
-   --log-dir <dir>         Custom logs directory (default: logs/<ts>)
-   --no-color              Disable colored logs
-   --no-live-logs          Do not stream logs live (still write to files)
- -h,   --help                Show help
-    --version             Print version
+Required:
+  --config <filename>   JSON config relative to experiments-configurations/
+
+Optional:
+  --verbose             Promote log level to DEBUG for all phases
 ```
 
 ## Configuration schema
@@ -130,8 +113,6 @@ Important fields (see `_TEMPLATE.json`):
   - `is_machine_instantiator_manual` (boolean). If absent but
     `is_machine_instantiator_automatic` exists, it is inverted with a warning.
   - `os_distribution_type` (int): 1=Debian/apt, 2=RHEL7/yum, 3=RHEL7+/dnf
-  - `list_of_needed_libraries` (string): path to a packages file on the machine
-    (will be uploaded to remote /tmp and installed)
   - `env_variables_list` (array of single-key objects): persisted via `write-env.sh`
 - `running_experiments.on_fe`
   - `to_do_parameters_list_path` (string): absolute path on FE with parameters
@@ -142,41 +123,41 @@ Important fields (see `_TEMPLATE.json`):
     on the machine
 - `running_experiments.number_of_experiments_to_run_in_parallel_on_machine` (int)
 - `running_experiments.experiments_collection` (object; may be empty)
-  - Example keys for built-in strategy:
-    - `collection_strategy`: "csnn_collection.sh"
-    - `path_to_saved_experiment_results_on_machine`: directory containing *.txt
-      results
-    - `path_to_save_experiment_results_on_fe`: output directory for the combined file
+  - `base_path`: folder name (relative to `experiments-runner/collected/`) or absolute FE path where files are copied.
+  - `lookup_rules`: array of `{ "label": "glob" }` entries defining glob patterns.
+  - `ftransfers`: array of transfer objects containing:
+    - `look_into`: absolute directory on the node to scan.
+    - `look_for`: array of rule labels to apply.
+    - `transfer_to_subfolder_of_base_path`: destination subfolder created under the resolved base path.
+  - Omit the object or set to `{}` to skip artifact collection entirely.
 
 Tip: Start from `_TEMPLATE.json` and replace absolute paths and values.
 
 ## Phase details
 
-- instantiate
-  - Runs `manual-machine-start.sh` (validates SSH) or `automatic-machine-start.sh` (stub; exits 2).
-- prepare
-  - Creates the remote tree under `~/experiments_node/on-machine/` and uploads
+- Runs `manual-machine-start.sh` (validates SSH) or `automatic-machine-start.sh` (stub; exits 2).
+- Creates the remote tree under `~/experiments_node/on-machine/` and uploads
     `run-batch.sh` and collection scripts.
-  - Persists env vars with `write-env.sh` and installs packages via
-    `install-dependencies.sh` using the selected package manager.
-- delegate
-  - `on-fe/experiments-delegator.sh` selects up to N TODO lines from the params file
+- Persists env vars with `write-env.sh`. Package installation from config has
+    been removed; perform any dependency setup inside your image or manually.
+- `on-fe/experiments-delegator.sh` selects up to N TODO lines from the params file
     using a tracker `*_tracker.txt` (same folder).
-  - Uploads a `commands.pending` file to the remote bootstrap folder and calls
+- Uploads a `commands.pending` file to the remote bootstrap folder and calls
     `on-machine/run-batch.sh` with `--parallel N`.
-  - Streams remote logs from `~/experiments_node/on-machine/logs/`
+- Streams remote logs from `~/experiments_node/on-machine/logs/`
     (use `--no-stream` to disable).
-- collect
-  - Default `csnn_collection.sh` concatenates all `*.txt` under the machine path
-    into `collected_results.txt` inside the FE path.
-  - Note: By default, this runs on the machine; pull results to your FE if needed
-    via `scp`.
+- Phase 4 now drives a reusable collector pipeline: prescan → quickcheck →
+    enumeration → copy.
+- Remote helpers live in `runtime/phases/phase-collection/remote-tools/` and are uploaded
+  automatically per run inside the temporary bundle.
 
 ## Delegation & tracker behavior
 
 - The tracker file is `${params_file%.txt}_tracker.txt` next to your params file.
-- TODO lines = params minus tracker (exact string match after trimming and removing comments).
-- If fewer than N TODO lines remain, only those are run (including 0, in which case the delegator exits with a friendly message).
+- TODO lines = params minus tracker (exact string match after trimming and
+  removing comments).
+- If fewer than N TODO lines remain, only those are run. When the count is
+  zero, the delegator exits with a friendly message.
 
 ## Logs and where to look
 
@@ -187,7 +168,8 @@ Tip: Start from `_TEMPLATE.json` and replace absolute paths and values.
 
 ## Exit codes (summary)
 
-- experiments-controller.sh: 0 success; 2 on invalid args/dependencies/config; propagates non-zero from phases unless `--continue-on-error`
+- experiments-controller.sh: 0 success; 2 on invalid args, dependencies, or
+  config; propagates non-zero from phases unless `--continue-on-error`
 - machine-instantiator/automatic-machine-start.sh: 2 (not implemented yet)
 - machine-instantiator/manual-machine-start.sh: 1 missing env/SSH key; 2 SSH connectivity failure
 - project-preparation/prepare-remote-structure.sh: 2 on invalid args/missing tools; non-zero on remote failures
@@ -195,7 +177,6 @@ Tip: Start from `_TEMPLATE.json` and replace absolute paths and values.
 - node-setup/write-env.sh: 2 on invalid args or missing jq
 - experiments-delegator/on-fe/experiments-delegator.sh: 2 on invalid args; non-zero on remote failures
 - experiments-delegator/on-machine/run-batch.sh: 1 if any job reported errors; 2 on invalid args
-- experiments-collector/on-machine/csnn_collection.sh: 2 on invalid args/paths
 
 ## Troubleshooting
 
@@ -206,10 +187,9 @@ Tip: Start from `_TEMPLATE.json` and replace absolute paths and values.
     and that the host is reachable from the FE.
 - Permission denied writing env
   - `write-env.sh` prefers `/etc/profile.d` if passwordless sudo is available; otherwise falls back to `~/.profile`.
-- Packages fail to install
-  - Confirm `os_distribution_type` matches the remote OS and
-    `list_of_needed_libraries` is accessible;
-    check remote `/tmp/install-deps_*.sh` logs.
+-- Packages fail to install
+  - Dependency installation is no longer driven by config. Ensure your image
+    contains the needed packages or run `install-dependencies.sh` manually.
 - No jobs selected (empty TODO)
   - Inspect your params file and `*_tracker.txt`; remove or edit the tracker to reschedule lines deliberately.
 - Parallel execution not installed
@@ -217,28 +197,101 @@ Tip: Start from `_TEMPLATE.json` and replace absolute paths and values.
 - Where did my results go?
   - Raw per-job outputs live in `~/experiments_node/on-machine/logs/` and any
     `*.txt` your executable writes under the results path.
-  - The `csnn_collection.sh` merges `*.txt` into `collected_results.txt`
-    under the configured FE path on the machine;
-    use `scp` to copy it back to the FE as needed.
+  - The collector pipeline copies artifacts into `experiments-runner/collected/<base_path>/<subfolder>`
+    on the FE (or to your absolute `base_path` if you provided one).
 
-## Examples
+## Per-project params folders
 
-Dry-run all phases with verbose logs:
+You can organize parameter lists per project inside the repo under
+`experiments-runner/params/` using one folder per project. Each project
+contains its params file (one params line per experiment). The delegator
+tracker file is created next to that params file.
+
+Params path resolution rules (Option A behavior):
+
+- The config value `running_experiments.on_fe.to_do_parameters_list_path` may
+  be either an absolute path or a repo-relative path.
+- If the value starts with `/` it is treated as an absolute path and used
+  verbatim.
+- If the value is relative, the controller resolves it under a base
+  directory `PARAMS_BASE` which defaults to `experiments-runner/params` in
+  the repo. You can override by exporting `PARAMS_BASE` in your environment
+  before running the controller:
 
 ```bash
-./experiments-runner/experiments-controller.sh --config csnn-faces.json --dry-run --verbose
+export PARAMS_BASE=/home/youruser/SwiftDeploy-G5K/experiments-runner/params
+./experiments-runner/experiments-controller.sh --config csnn-faces.json
 ```
 
-Prepare remote structure only:
+This preserves configs that already contain absolute paths (like
+`csnn-faces.json`) while allowing shorthand relative project paths for
+others (e.g. `project-a/a.txt`).
 
-```bash
-./experiments-runner/experiments-controller.sh --config my-exp.json --phases prepare
+## Collected results base
+
+The controller now supports a repo-local base directory for collected
+results on the frontend. If your config's `experiments_collection.path_to_save_experiment_results_on_fe`
+is an absolute path it will be used as-is. If you put a project name (or
+relative path) there, the controller will resolve it under
+`experiments-runner/collected/` by default. You can override the base with
+`COLLECTED_BASE` env var.
+
+Example:
+
+```json
+"experiments_collection": {
+  "base_path": "csnn-ckplus",
+  "lookup_rules": [
+    { "txt": "*.txt" }
+  ],
+  "ftransfers": [
+    {
+      "look_into": "/root/csnn-build/result",
+      "look_for": ["txt"],
+      "transfer_to_subfolder_of_base_path": "results"
+    }
+  ]
+}
 ```
 
-Delegate with no live streaming and continue after failures:
+This copies matched files under `experiments-runner/collected/csnn-ckplus/results/` on the FE.
+If you provide an absolute `base_path`, it will be used as-is.
+
+Example layout:
+
+```text
+experiments-runner/params/
+  project-a/
+    a.txt            # params for project A
+    a_tracker.txt    # created by delegator (ignored by git)
+  project-b/
+    b.txt
+    b_tracker.txt
+```
+
+How to use:
+
+- Put your params file at the absolute path your FE will have after you
+  clone the repo on the frontend (e.g. `/home/feuser/SwiftDeploy-G5K/experiments-runner/params/project-a/a.txt`).
+- Set `running_experiments.on_fe.to_do_parameters_list_path` in the config
+  to that absolute path. The delegator will create `${params_file%.txt}_tracker.txt`
+  next to the params file to keep track of completed lines.
+
+Note: `.gitignore` already ignores `experiments-runner/params/**/*_tracker.txt`
+so trackers won't be committed.
+
+## Common commands
+
+Run the full workflow with default logging:
 
 ```bash
-./experiments-runner/experiments-controller.sh --config my-exp.json --phases delegate --no-live-logs --continue-on-error
+./experiments-runner/experiments-controller.sh --config csnn-faces.json
+```
+
+Enable verbose (debug) logging for troubleshooting:
+
+```bash
+./experiments-runner/experiments-controller.sh --config csnn-faces.json --verbose
 ```
 
 Tail logs from the last run:
