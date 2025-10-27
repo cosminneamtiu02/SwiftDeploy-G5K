@@ -73,7 +73,6 @@ pipeline_artifact_transfer::run_quickcheck() {
 		count=$(ssh -o StrictHostKeyChecking=no "root@${node}" DIR_REMOTE="${look_into}" PAT_TOKEN="${pattern}" bash -lc $'cd "$DIR_REMOTE" 2>/dev/null || exit 0; compgen -G "$PAT_TOKEN" 2>/dev/null | wc -l' 2>/dev/null || true)
 		count=${count:-0}
 		total=$((total + count))
-		log_info "Transfer ${transfer_idx} quickcheck: '${pattern}' -> ${count}"
 		if [[ ${LOG_LEVEL:-info} == debug && ${count} -gt 0 ]]; then
 			local sample
 			sample=$(ssh -o StrictHostKeyChecking=no "root@${node}" DIR_REMOTE="${look_into}" PAT_TOKEN="${pattern}" bash -lc $'cd "$DIR_REMOTE" 2>/dev/null || exit 0; compgen -G "$PAT_TOKEN" 2>/dev/null | head -5' 2>/dev/null || true)
@@ -336,9 +335,7 @@ pipeline_artifact_transfer::handle_transfer() {
 	fi
 	pipeline_artifact_logging::log_prescan "${transfer_idx}" "${prescan_output}" "${patterns_ref_name}" "${look_into}" "${node_name}"
 
-	local quickcheck_total=0
 	pipeline_artifact_transfer::run_quickcheck "${transfer_idx}" "${node_name}" "${look_into}" "${patterns_ref_name}" quickcheck_total
-	log_debug "Transfer ${transfer_idx}: quickcheck total matches=${quickcheck_total}"
 
 	local enum_output=""
 	set +e
