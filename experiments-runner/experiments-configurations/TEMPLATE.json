@@ -9,9 +9,17 @@
     },
     "number_of_experiments_to_run_in_parallel_on_machine": 5,
     "experiments_collection": {
-      "collection_strategy": "csnn_collection.sh",
-      "path_to_save_experiment_results_on_fe": "csnn-ckplus",
-      "path_to_saved_experiment_results_on_machine": "/root/csnn-build/result"
+      "base_path": "csnn-ckplus",
+      "lookup_rules": [
+        { "txt": "*.txt" }
+      ],
+      "ftransfers": [
+        {
+          "look_into": "/root/csnn-build/result",
+          "look_for": ["txt"],
+          "transfer_to_subfolder_of_base_path": "results"
+        }
+      ]
     }
   },
   "machine_setup": {

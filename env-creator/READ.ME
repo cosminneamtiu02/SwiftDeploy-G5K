@@ -30,12 +30,12 @@ Run the controller:
 ## How It Works
 
 - **Reads configuration** from:
-  grid5k-csnn/env-creator/configs/<config_file>.conf
+  env-creator/configs/<config_file>.conf
 
 - **Deploys the OS image** using:
   kadeploy3 <OS_NAME>
 
-- **Copies and executes your setup script** (must be placed in `node_build_scripts/`) on the node
+- **Copies and executes your setup script** (must be placed in `node-build-scripts/`) on the node
 
 - **Archives the environment** into:
   ~/envs/img/<GENERAL_NAME>.tar.zst
@@ -50,20 +50,23 @@ Run the controller:
 ## Outputs
 
 - Compressed environment image:
-  ~/envs/<GENERAL_NAME>.tar.zst
+  ~/envs/img/<GENERAL_NAME>.tar.zst
 
 - YAML environment description:
-  ~/<GENERAL_NAME>.yaml
+  ~/envs/img-files/<GENERAL_NAME>.yaml
 
 
 ## Important Notes
 
-- The **node setup script** you reference in your config must be placed under:
-  grid5k-csnn/env-creator/node_build_scripts/
+- The **node setup script** referenced in the config must live under:
+  env-creator/node-build-scripts/
 
 - You must run the controller **inside the interactive session** started with `oarsub`.
 
 - The script automatically cleans up the temporary node tracking file after use.
+
+- Redeploy the saved environment later:
+  kadeploy3 -a ~/envs/img-files/<GENERAL_NAME>.yaml
 
 
 ## Example Run
@@ -90,4 +93,4 @@ Step:
   ./env-creator/frontend-controller.sh csnn-ckplus-3d-CN.conf
 
 - Redeploy the saved environment later:
-  kadeploy3 -a <GENERAL_NAME>.yaml
+  kadeploy3 -a ~/envs/img-files/<GENERAL_NAME>.yaml

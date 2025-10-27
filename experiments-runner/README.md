@@ -15,9 +15,7 @@ experiments-controller.sh (front-end orchestrator)
  │    ├─ common/
  │    │    ├─ environment.sh      # shared path + logging bootstrap
  │    │    ├─ logging.sh          # thin wrapper around liblog
- │    │    ├─ file_transfer.sh    # scp/tar helpers (legacy)
- │    │    ├─ remote.sh           # upload + invoke remote scripts (legacy)
- │    │    └─ collector.sh        # JSON parsing + validation (legacy)
+ │    │    └─ collector.sh        # JSON parsing + validation helpers
  │    ├─ selection/select_batch.sh
  │    ├─ provisioning/provision_machine.sh
  │    ├─ preparation/prepare_project_assets.sh
@@ -53,8 +51,9 @@ Remote layout on the target machine (created under the user’s home):
   executables/   # optional helper binaries/scripts
   results/       # experiment outputs
   logs/          # per-job logs (job_N.out/err)
-  collection/    # collection strategies (e.g., csnn_collection.sh)
   bootstrap/     # commands.pending, setup helpers
+
+Collector remote tools are uploaded per run under `/tmp/swiftdeploy_pipeline_<user>_<pid>/`.
 ```
 
 ## Prerequisites
@@ -124,11 +123,13 @@ Important fields (see `_TEMPLATE.json`):
     on the machine
 - `running_experiments.number_of_experiments_to_run_in_parallel_on_machine` (int)
 - `running_experiments.experiments_collection` (object; may be empty)
-  - Example keys for built-in strategy:
-    - `collection_strategy`: "csnn_collection.sh"
-    - `path_to_saved_experiment_results_on_machine`: directory containing *.txt
-      results
-    - `path_to_save_experiment_results_on_fe`: output directory for the combined file
+  - `base_path`: folder name (relative to `experiments-runner/collected/`) or absolute FE path where files are copied.
+  - `lookup_rules`: array of `{ "label": "glob" }` entries defining glob patterns.
+  - `ftransfers`: array of transfer objects containing:
+    - `look_into`: absolute directory on the node to scan.
+    - `look_for`: array of rule labels to apply.
+    - `transfer_to_subfolder_of_base_path`: destination subfolder created under the resolved base path.
+  - Omit the object or set to `{}` to skip artifact collection entirely.
 
 Tip: Start from `_TEMPLATE.json` and replace absolute paths and values.
 
@@ -147,11 +148,8 @@ Tip: Start from `_TEMPLATE.json` and replace absolute paths and values.
     (use `--no-stream` to disable).
 - Phase 4 now drives a reusable collector pipeline: prescan → quickcheck →
     enumeration → copy.
-- Remote helpers live in `pipeline/phases/phase-collection/remote-tools/` and are uploaded
-  automatically per run.
-- Default `csnn_collection.sh` remains available for manual use, but the
-    controller primarily relies on lookup rules + file transfer directives
-    defined in the config JSON.
+- Remote helpers live in `runtime/phases/phase-collection/remote-tools/` and are uploaded
+  automatically per run inside the temporary bundle.
 
 ## Delegation & tracker behavior
 
@@ -179,7 +177,6 @@ Tip: Start from `_TEMPLATE.json` and replace absolute paths and values.
 - node-setup/write-env.sh: 2 on invalid args or missing jq
 - experiments-delegator/on-fe/experiments-delegator.sh: 2 on invalid args; non-zero on remote failures
 - experiments-delegator/on-machine/run-batch.sh: 1 if any job reported errors; 2 on invalid args
-- experiments-collector/on-machine/csnn_collection.sh: 2 on invalid args/paths
 
 ## Troubleshooting
 
@@ -200,9 +197,8 @@ Tip: Start from `_TEMPLATE.json` and replace absolute paths and values.
 - Where did my results go?
   - Raw per-job outputs live in `~/experiments_node/on-machine/logs/` and any
     `*.txt` your executable writes under the results path.
-  - The `csnn_collection.sh` merges `*.txt` into `collected_results.txt`
-    under the configured FE path on the machine;
-    use `scp` to copy it back to the FE as needed.
+  - The collector pipeline copies artifacts into `experiments-runner/collected/<base_path>/<subfolder>`
+    on the FE (or to your absolute `base_path` if you provided one).
 
 ## Per-project params folders
 
@@ -244,13 +240,22 @@ Example:
 
 ```json
 "experiments_collection": {
-  "collection_strategy": "csnn_collection.sh",
-  "path_to_save_experiment_results_on_fe": "csnn-ckplus",
-  "path_to_saved_experiment_results_on_machine": "/root/csnn-build/result"
+  "base_path": "csnn-ckplus",
+  "lookup_rules": [
+    { "txt": "*.txt" }
+  ],
+  "ftransfers": [
+    {
+      "look_into": "/root/csnn-build/result",
+      "look_for": ["txt"],
+      "transfer_to_subfolder_of_base_path": "results"
+    }
+  ]
 }
 ```
 
-This will write collected outputs to `experiments-runner/collected/csnn-ckplus/collected_results.txt`.
+This copies matched files under `experiments-runner/collected/csnn-ckplus/results/` on the FE.
+If you provide an absolute `base_path`, it will be used as-is.
 
 Example layout:
 

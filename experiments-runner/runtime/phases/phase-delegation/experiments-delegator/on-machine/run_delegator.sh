@@ -72,30 +72,25 @@ else
 		already_done=()
 	fi
 
-	# Compute remaining by filtering todo - done
-	remaining=()
+	# Track done entries in an associative set for O(1) lookups
+	declare -A done_set=()
+	for d in "${already_done[@]}"; do
+		[[ -n ${d} ]] && done_set["${d}"]=1
+	done
+
 	for line in "${todo[@]}"; do
-		skip=false
-		for d in "${already_done[@]}"; do
-			if [[ ${line} == "${d}" ]]; then
-				skip=true
+		if [[ -z ${done_set["${line}"]+x} ]]; then
+			batch+=("${line}")
+			if ((${#batch[@]} >= PARALLEL_N)); then
 				break
 			fi
-		done
-		if ! ${skip}; then
-			remaining+=("${line}")
 		fi
 	done
 
-	if [[ ${#remaining[@]} -eq 0 ]]; then
+	if ((${#batch[@]} == 0)); then
 		log "No more lines left to run experiments on. Exiting."
 		exit 0
 	fi
-
-	# Take up to PARALLEL_N lines
-	for ((i = 0; i < ${#remaining[@]} && i < PARALLEL_N; i++)); do
-		batch+=("${remaining[${i}]}")
-	done
 fi
 
 # Log batch parameters prominently and write them immediately to tracker

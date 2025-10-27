@@ -37,7 +37,6 @@ pipeline_artifact_transfer::run_prescan() {
 	local output_var="$6"
 	local patterns_joined=""
 	pipeline_artifact_transfer::join_patterns "${patterns_ref_name}" patterns_joined
-	log_debug "Transfer ${transfer_idx}: running prescan with patterns '${patterns_joined}'"
 	local prescan_tmp=""
 	prescan_tmp=$(mktemp) || return 1
 	local rc=0
@@ -276,7 +275,7 @@ pipeline_artifact_transfer::handle_zero_matches() {
 		fi
 		local diag_output=""
 		pipeline_artifact_transfer::run_deep_diag "${node}" "${bundle_dir}" "${look_into}" "${patterns_ref_name}" diag_output
-		pipeline_artifact_logging::log_deep_diag "${transfer_idx}" "${diag_output}" "${patterns_ref_name}" "${look_into}" "${dest_dir}"
+		pipeline_artifact_logging::log_deep_diag "${transfer_idx}" "${diag_output}" "${patterns_ref_name}" "${look_into}"
 		local alt_dirs=()
 		if [[ ${look_into} == */result ]]; then alt_dirs+=("${look_into%/result}/results"); fi
 		if [[ ${look_into} == */results ]]; then alt_dirs+=("${look_into%/results}/result"); fi
@@ -334,8 +333,6 @@ pipeline_artifact_transfer::handle_transfer() {
 		log_warn "Transfer ${transfer_idx}: prescan returned status ${prescan_rc}"
 	fi
 	pipeline_artifact_logging::log_prescan "${transfer_idx}" "${prescan_output}" "${patterns_ref_name}" "${look_into}" "${node_name}"
-
-	pipeline_artifact_transfer::run_quickcheck "${transfer_idx}" "${node_name}" "${look_into}" "${patterns_ref_name}" quickcheck_total
 
 	local enum_output=""
 	set +e
@@ -470,6 +467,6 @@ pipeline_artifact_transfer::process_transfer() {
 	dest_dir="${dest_root}/${subfolder}"
 	pipeline_env::ensure_directory "${dest_dir}"
 
-	pipeline_artifact_logging::log_transfer_intro "${transfer_idx}" "${look_into}" "${dest_dir}" "labels" "patterns"
+	pipeline_artifact_logging::log_transfer_intro "${transfer_idx}" "${look_into}" "labels" "patterns"
 	pipeline_artifact_transfer::handle_transfer "${transfer_idx}" "${node_name}" "${look_into}" "${dest_dir}" "${bundle_dir}" "${exec_dir}" "patterns"
 }

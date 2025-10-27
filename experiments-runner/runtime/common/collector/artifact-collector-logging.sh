@@ -17,14 +17,12 @@ pipeline_env::bootstrap
 pipeline_artifact_logging::log_transfer_intro() {
 	local transfer_idx="${1:-}"
 	local look_into="${2:-}"
-	local dest_dir="${3:-}"
-	local labels_name="$4"
-	local patterns_name="$5"
+	local labels_name="$3"
+	local patterns_name="$4"
 	declare -n labels_ref="${labels_name}"
 	declare -n patterns_ref="${patterns_name}"
 	log_info "Transfer ${transfer_idx}: patterns used (raw) = ${patterns_ref[*]} (labels: ${labels_ref[*]})"
 	log_info "Transfer ${transfer_idx}: lookup path (node) = ${look_into}"
-	log_debug "Transfer ${transfer_idx}: destination (FE) = ${dest_dir}"
 }
 
 pipeline_artifact_logging::log_prescan() {
@@ -92,7 +90,6 @@ pipeline_artifact_logging::log_deep_diag() {
 	local patterns_name="$3"
 	declare -n patterns_ref="${patterns_name}"
 	local look_into="${4:-}"
-	local dest_dir="${5:-}"
 	if [[ -z ${diag_output} ]]; then
 		return
 	fi

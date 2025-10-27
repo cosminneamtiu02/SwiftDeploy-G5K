@@ -52,8 +52,6 @@ _runner_env_bootstrap() {
 	export EXECUTION_ROOT
 	COLLECTION_ROOT="${PHASE_ROOT}/phase-collection"
 	export COLLECTION_ROOT
-	REMOTE_TOOL_ROOT="${COLLECTION_ROOT}/remote-tools"
-	export REMOTE_TOOL_ROOT
 	COLLECTOR_COMMON_ROOT="${COMMON_ROOT}/collector"
 	export COLLECTOR_COMMON_ROOT
 

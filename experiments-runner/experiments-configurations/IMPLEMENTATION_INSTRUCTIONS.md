@@ -53,17 +53,28 @@ The controller expects a JSON file inside `experiments-runner/experiments-config
 ### running_experiments.experiments_collection
 
 - Optional: Omit or set `{}` to skip.
-- Built-in example strategy `csnn_collection.sh`:
-  - `collection_strategy`: Must be `"csnn_collection.sh"` for the built-in collector
-  - `path_to_saved_experiment_results_on_machine`: Directory with `*.txt` to collect
-  - `path_to_save_experiment_results_on_fe`: Target directory on FE for the combined file
+- Fields for the bundle-based collector:
+  - `base_path`: Folder name (relative to `experiments-runner/collected/`) or absolute FE path where files are copied.
+  - `lookup_rules`: Array of `{ "label": "glob" }` objects defining patterns.
+  - `ftransfers`: Array of transfer objects. Each requires:
+    - `look_into`: Absolute directory on the node to scan.
+    - `look_for`: Array of rule labels to apply.
+    - `transfer_to_subfolder_of_base_path`: Destination subfolder created under the resolved base path.
 - Example:
 
 ```json
 {
-  "collection_strategy": "csnn_collection.sh",
-  "path_to_saved_experiment_results_on_machine": "/root/csnn-build/result",
-  "path_to_save_experiment_results_on_fe": "csnn-ckplus"
+  "base_path": "csnn-ckplus",
+  "lookup_rules": [
+    { "txt": "*.txt" }
+  ],
+  "ftransfers": [
+    {
+      "look_into": "/root/csnn-build/result",
+      "look_for": ["txt"],
+      "transfer_to_subfolder_of_base_path": "results"
+    }
+  ]
 }
 ```
 
