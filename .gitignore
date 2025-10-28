@@ -6,6 +6,3 @@ node_modules/
 
 # IDE files
 .vscode/
-
-# generated YAMLs for env-creator
-experiments-runner/generated-yamls/

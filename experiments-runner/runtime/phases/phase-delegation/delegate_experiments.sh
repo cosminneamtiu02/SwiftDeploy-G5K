@@ -102,8 +102,7 @@ fi'
 	fi
 
 	write_state_file "${state_file}" \
-		"DELEGATION_RC=${deleg_rc}" \
-		"NODE_NAME=${node_name}"
+		"DELEGATION_RC=${deleg_rc}"
 
 	return "${deleg_rc}"
 }

@@ -80,46 +80,40 @@ phase_run() {
 	fi
 
 	runner_env::ensure_directory "${log_dir}"
-	local inst_log
-	inst_log="${log_dir}/instantiator.log"
-
 	log_step 'Provisioning machine on front-end'
+	local inst_output=""
 	if [[ ${is_manual} == 'true' ]]; then
-		"${inst_dir}/manual_instantiator.sh" "${image_yaml}" | tee -a "${inst_log}"
+		if ! inst_output=$("${inst_dir}/manual_instantiator.sh" "${image_yaml}" 2>&1); then
+			printf '%s\n' "${inst_output}" >&2
+			die 'Manual instantiation failed'
+		fi
 	else
-		if ! "${inst_dir}/automatic_instantiator.sh" "${image_yaml}" | tee -a "${inst_log}"; then
-			die 'Automatic instantiation not implemented'
+		if ! inst_output=$("${inst_dir}/automatic_instantiator.sh" "${image_yaml}" 2>&1); then
+			printf '%s\n' "${inst_output}" >&2
+			die 'Automatic instantiation failed'
 		fi
 	fi
 
-	local node_file_candidates=(
-		"${RUNNER_ROOT}/current_node.txt"
-		"${REPO_ROOT}/current_node.txt"
-	)
-	local node_file=''
-	local candidate
-	for candidate in "${node_file_candidates[@]}"; do
-		if [[ -f ${candidate} ]]; then
-			node_file="${candidate}"
-			break
-		fi
-	done
-	if [[ -z ${node_file} ]]; then
-		die 'Node name file not found. Ensure instantiation script recorded the hostname.'
+	# Relay instantiation logs to the caller
+	if [[ -n ${inst_output} ]]; then
+		printf '%s\n' "${inst_output}" | grep -v '^NODE_NAME=' || true
 	fi
 
 	local node_name
-	node_name=$(<"${node_file}")
+	node_name=$(printf '%s\n' "${inst_output}" | awk -F'=' '$1=="NODE_NAME" {print $2; exit}')
 	if [[ -z ${node_name} ]]; then
-		die "Empty node name read from ${node_file}"
+		die 'Instantiation script did not return a node name.'
 	fi
-	log_info "Target node: ${node_name}"
 
-	write_state_file "${state_file}" \
-		"NODE_NAME=${node_name}" \
-		"NODE_FILE=${node_file}" \
-		"IMAGE_YAML=${image_yaml}" \
-		"INST_LOG=${inst_log}"
+	log_info 'Target node selected in memory.'
+
+	if [[ -n ${state_file} ]]; then
+		write_state_file "${state_file}" \
+			"IMAGE_YAML=${image_yaml}"
+	fi
+
+	printf '__RESULT__ NODE_NAME=%s\n' "${node_name}"
+	printf '__RESULT__ IMAGE_YAML=%s\n' "${image_yaml}"
 }
 
 main() {
