@@ -365,6 +365,12 @@ pipeline_artifact_transfer::handle_transfer() {
 		return
 	fi
 
+	log_info "Transfer ${transfer_idx}: matched ${#remote_files[@]} file(s) to copy:"
+	local matched
+	for matched in "${remote_files[@]}"; do
+		log_info "  ${matched}"
+	done
+
 	local dest_before
 	dest_before=$(find "${dest_dir}" -mindepth 1 -maxdepth 1 -printf '.' 2>/dev/null | wc -c | tr -d '[:space:]' || true)
 	log_info "Transfer ${transfer_idx}: ${#remote_files[@]} unique files from ${look_into} -> ${dest_dir}, FE entries before=${dest_before:-0}"
