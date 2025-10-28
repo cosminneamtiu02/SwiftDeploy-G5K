@@ -40,10 +40,9 @@ source "${CONFIG_PATH}"
 # TAR file path (under user's home in dedicated img folder)
 TAR_BASE_DIR="${HOME}/envs/img"
 TAR_FILE="${TAR_BASE_DIR}/${GENERAL_NAME}.tar.zst"
-# Directory where generated YAML files will be stored. Can be overridden by
-# setting YAML_OUTPUT_DIR in the environment before running this script.
-# Default is ${HOME}/envs/img-files so that deployment uses kadeploy3 -a from there.
-YAML_OUTPUT_DIR="${YAML_OUTPUT_DIR:-${HOME}/envs/img-files}"
+# Directory where generated YAML files will be stored.
+# Always place descriptors under ${HOME}/envs/img-files so the provisioner can locate them.
+YAML_OUTPUT_DIR="${HOME}/envs/img-files"
 YAML_FILE="${YAML_OUTPUT_DIR}/${GENERAL_NAME}.yaml"
 LOCAL_SCRIPT_PATH="${NODE_SCRIPT_DIR}/${SETUP_SCRIPT}"
 

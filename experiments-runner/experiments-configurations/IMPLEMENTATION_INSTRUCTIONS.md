@@ -81,7 +81,7 @@ The controller expects a JSON file inside `experiments-runner/experiments-config
 ### machine_setup.image_to_use
 
 - What: The image YAML filename to deploy.
-- Location: `experiments-runner/generated-yamls/`
+- Location: `~/envs/img-files/` (produced by the env creator)
 - Example: `"env-csnn-st-with-dbs-image.yaml"`
 
 ### machine_setup.env_variables_list
