@@ -18,6 +18,64 @@ runner_env::bootstrap
 
 runner_env::require_cmd jq
 
+CURRENT_PHASE="Initialization"
+ROLLBACK_PENDING=false
+ROLLBACK_COMPLETED=false
+ERROR_ALREADY_HANDLED=false
+declare -a SELECTED_PARAMS=()
+SELECTED_DONE_FILE=""
+SELECTED_PARAMS_B64=""
+
+controller::set_phase() {
+	CURRENT_PHASE="$1"
+}
+
+controller::revert_selection() {
+	if [[ ${ROLLBACK_PENDING} != true ]]; then
+		return 0
+	fi
+	if [[ ${ROLLBACK_COMPLETED} == true ]]; then
+		return 0
+	fi
+	if [[ -z ${SELECTED_DONE_FILE} ]]; then
+		return 0
+	fi
+	if ((${#SELECTED_PARAMS[@]} == 0)); then
+		return 0
+	fi
+	select_batch::remove_entries_from_done "${SELECTED_DONE_FILE}" "${SELECTED_PARAMS[@]}"
+	ROLLBACK_PENDING=false
+	ROLLBACK_COMPLETED=true
+	return 0
+}
+
+controller::handle_error() {
+	local exit_code="$1"
+	local failed_command="$2"
+	log_error "Error source: ${CURRENT_PHASE:-unknown phase}"
+	log_error "Failing command: ${failed_command}"
+	log_error "Exit code: ${exit_code}"
+	ERROR_ALREADY_HANDLED=true
+	controller::revert_selection
+	trap - ERR INT
+	exit "${exit_code}"
+}
+
+controller::handle_interrupt() {
+	log_error "Execution interrupted by user during ${CURRENT_PHASE:-unknown phase}."
+	ERROR_ALREADY_HANDLED=true
+	controller::revert_selection
+	trap - ERR INT
+	exit 130
+}
+
+controller::disable_failure_traps() {
+	trap - ERR INT
+}
+
+trap 'controller::handle_error $? "${BASH_COMMAND}"' ERR
+trap controller::handle_interrupt INT
+
 usage() {
 	cat <<'EOF'
 Usage: experiments-controller.sh --config <config.json> [--verbose]
@@ -27,6 +85,7 @@ EOF
 CONFIG_NAME=""
 VERBOSE=false
 
+controller::set_phase "Project preparation"
 while [[ $# -gt 0 ]]; do
 	case "$1" in
 		--config)
@@ -89,22 +148,38 @@ cleanup_state_dir() {
 		rm -rf "${STATE_DIR}" 2>/dev/null || true
 	fi
 }
-trap cleanup_state_dir EXIT
 
-PHASE0_STATE_FILE="${STATE_DIR}/phase0_state.env"
+controller::handle_exit() {
+	local exit_code=$?
+	trap - EXIT
+	if ((exit_code != 0)); then
+		if [[ ${ERROR_ALREADY_HANDLED} != true ]]; then
+			log_error "Terminating during ${CURRENT_PHASE:-unknown phase}."
+			log_error "Exit code: ${exit_code}"
+			controller::revert_selection
+		fi
+	else
+		controller::disable_failure_traps
+	fi
+	cleanup_state_dir
+	exit "${exit_code}"
+}
+trap controller::handle_exit EXIT
+
 PHASE1_STATE_FILE="${STATE_DIR}/phase1_state.env"
 PHASE2_STATE_FILE="${STATE_DIR}/phase2_state.env"
 PHASE3_STATE_FILE="${STATE_DIR}/phase3_state.env"
 PHASE4_STATE_FILE="${STATE_DIR}/phase4_state.env"
 
-SELECTION_SCRIPT="${SELECTION_ROOT}/select_batch.sh"
+SELECTION_LIB="${SELECTION_ROOT}/select_batch.sh"
 PROVISION_SCRIPT="${PROVISIONING_ROOT}/provision_machine.sh"
 PREPARATION_SCRIPT="${PREPARATION_ROOT}/prepare_project_assets.sh"
 EXECUTION_SCRIPT="${EXECUTION_ROOT}/delegate_experiments.sh"
 COLLECTION_SCRIPT="${COLLECTION_ROOT}/collect-artifacts.sh"
 
+[[ -r ${SELECTION_LIB} ]] || die "Missing selection library: ${SELECTION_LIB}"
+
 for required_script in \
-	"${SELECTION_SCRIPT}" \
 	"${PROVISION_SCRIPT}" \
 	"${PREPARATION_SCRIPT}" \
 	"${EXECUTION_SCRIPT}" \
@@ -112,33 +187,42 @@ for required_script in \
 	[[ -x ${required_script} ]] || die "Missing executable script: ${required_script}"
 done
 
+# shellcheck source=experiments-runner/runtime/phases/phase-selection/select_batch.sh
+source "${SELECTION_LIB}"
+
 # --- Phase 0: Selection ---
-"${SELECTION_SCRIPT}" run --config "${CONFIG_PATH}" --state-file "${PHASE0_STATE_FILE}"
-# shellcheck source=/dev/null
-source "${PHASE0_STATE_FILE}"
+controller::set_phase "Selection"
+SELECTED_PARAMS=()
+SELECTED_DONE_FILE=""
+SELECTED_PARAMS_B64=""
 
-BATCH_SELECTED=${BATCH_SELECTED:-0}
-SELECTED_LINES_FILE=${SELECTED_LINES_FILE:-""}
-SELECTED_LINES_B64=${SELECTED_LINES_B64:-""}
+select_batch::pick "${CONFIG_PATH}" SELECTED_PARAMS SELECTED_DONE_FILE SELECTED_PARAMS_B64
 
-if [[ ${BATCH_SELECTED} -ne 1 ]]; then
-	"${SELECTION_SCRIPT}" finalize --state-file "${PHASE0_STATE_FILE}" --status success
-	cleanup_state_dir
-	trap - EXIT
+if ((${#SELECTED_PARAMS[@]} == 0)); then
+	controller::disable_failure_traps
 	log_success 'Stopped before execution: no pending parameters.'
 	exit 0
 fi
 
-if [[ -f ${SELECTED_LINES_FILE} ]]; then
-	SELECTED_BATCH_CONTENT=$(<"${SELECTED_LINES_FILE}")
-	export SELECTED_BATCH="${SELECTED_BATCH_CONTENT}"
+runner_env::ensure_directory "$(dirname "${SELECTED_DONE_FILE}")"
+if [[ ! -f ${SELECTED_DONE_FILE} ]]; then
+	: >"${SELECTED_DONE_FILE}"
 fi
+{
+	for todo_line in "${SELECTED_PARAMS[@]}"; do
+		printf '%s\n' "${todo_line}"
+	done
+} >>"${SELECTED_DONE_FILE}"
+log_info "Recorded ${#SELECTED_PARAMS[@]} parameter(s) in ${SELECTED_DONE_FILE}."
 
-phase0_finalize_on_exit() {
-	"${SELECTION_SCRIPT}" finalize --state-file "${PHASE0_STATE_FILE}" --status failure
-	cleanup_state_dir
-}
-trap phase0_finalize_on_exit EXIT
+ROLLBACK_PENDING=true
+ROLLBACK_COMPLETED=false
+
+SELECTED_BATCH=$(printf '%s\n' "${SELECTED_PARAMS[@]}")
+export SELECTED_BATCH
+SELECTED_LINES_B64="${SELECTED_PARAMS_B64}"
+
+controller::set_phase "Machine provisioning"
 
 # --- Phase 1: Machine provisioning ---
 phase1_node=""
@@ -195,6 +279,7 @@ IMAGE_YAML=${phase1_image}
 [[ -n ${IMAGE_YAML} ]] || die 'Phase 1 did not produce IMAGE_YAML'
 
 # --- Phase 2: Project preparation ---
+controller::set_phase "Project preparation"
 "${PREPARATION_SCRIPT}" run \
 	--config "${CONFIG_PATH}" \
 	--node "${NODE_NAME}" \
@@ -204,6 +289,7 @@ IMAGE_YAML=${phase1_image}
 	--state-file "${PHASE2_STATE_FILE}"
 
 # --- Phase 3: Delegation ---
+controller::set_phase "Delegation"
 "${EXECUTION_SCRIPT}" run \
 	--node "${NODE_NAME}" \
 	--selected-b64 "${SELECTED_LINES_B64}" \
@@ -211,6 +297,7 @@ IMAGE_YAML=${phase1_image}
 	--state-file "${PHASE3_STATE_FILE}"
 
 # --- Phase 4: Collection ---
+controller::set_phase "Collection"
 EXEC_DIR=$(jq -r '.running_experiments.on_machine.full_path_to_executable // empty' "${CONFIG_PATH}")
 [[ -n ${EXEC_DIR} ]] || die 'Config error: .running_experiments.on_machine.full_path_to_executable is missing or empty'
 
@@ -221,12 +308,9 @@ EXEC_DIR=$(jq -r '.running_experiments.on_machine.full_path_to_executable // emp
 	--log-dir "${LOG_DIR}" \
 	--state-file "${PHASE4_STATE_FILE}"
 
-# --- Finalize Phase 0 ---
-"${SELECTION_SCRIPT}" finalize --state-file "${PHASE0_STATE_FILE}" --status success
-trap cleanup_state_dir EXIT
-
-if [[ -f ${SELECTED_LINES_FILE} ]]; then
-	rm -f "${SELECTED_LINES_FILE}" 2>/dev/null || true
-fi
+# --- Finalization ---
+ROLLBACK_PENDING=false
+controller::disable_failure_traps
+controller::set_phase "Finalization"
 
 log_success "All phases completed. Logs at: ${LOG_DIR}"
