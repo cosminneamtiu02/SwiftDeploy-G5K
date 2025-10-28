@@ -61,7 +61,6 @@ pipeline_artifact_logging::log_prescan() {
 		count=$(sed -n "s/^PREPAT:count:\"${escaped}\":\([0-9]\+\)$/\1/p" <<<"${prescan_output}")
 		count=${count:-0}
 		if ((count == 0)); then
-			log_info "SRC matches for pattern '${pattern}': <none>"
 			continue
 		fi
 		log_info "SRC matches for pattern '${pattern}' (${count}):"
