@@ -23,7 +23,6 @@ fi
 source "${COMMON_ENV}"
 runner_env::bootstrap
 
-CURRENT_NODE_FILE="${RUNNER_ROOT}/current_node.txt"
 YAML_DIR="${HOME}/envs/img-files"
 YAML_PATH="${YAML_DIR}/${YAML_NAME}"
 
@@ -82,7 +81,7 @@ status=$?
 set -e
 if [[ ${status} -eq 0 && -n ${tmp} ]]; then
 	NODE_NAME=${tmp}
-	log_info "Auto-detected node from OAR env file: ${NODE_NAME}"
+	log_info "Auto-detected node from OAR env file."
 else
 	set +e
 	tmp=$(detect_from_oarstat)
@@ -90,7 +89,7 @@ else
 	set -e
 	if [[ ${status} -eq 0 && -n ${tmp} ]]; then
 		NODE_NAME=${tmp}
-		log_info "Auto-detected node via oarstat: ${NODE_NAME}"
+		log_info "Auto-detected node via oarstat."
 	fi
 fi
 
@@ -102,9 +101,7 @@ if [[ -z ${NODE_NAME} ]]; then
 	fi
 fi
 
-printf '%s\n' "${NODE_NAME}" >"${CURRENT_NODE_FILE}"
-chmod 600 "${CURRENT_NODE_FILE}"
-log_info "Saved node to ${CURRENT_NODE_FILE}: ${NODE_NAME}"
+log_info "Working with detected node hostname."
 
 # Deploy the image to the allocated node if SSH isn't ready yet
 wait_for_ssh() {
@@ -126,23 +123,25 @@ wait_for_ssh() {
 
 if ! ssh -o BatchMode=yes -o StrictHostKeyChecking=no "root@${NODE_NAME}" 'echo ok' >/dev/null 2>&1; then
 	if command -v kadeploy3 >/dev/null 2>&1; then
-		log_warn "SSH on ${NODE_NAME} not ready. Deploying image via kadeploy3..."
+		log_warn "SSH on target node not ready. Deploying image via kadeploy3..."
 		# Prefer targeting the specific node to avoid ambiguity
 		if ! kadeploy3 -a "${YAML_PATH}" -m "${NODE_NAME}"; then
-			log_error "kadeploy3 failed on ${NODE_NAME}"
+			log_error "kadeploy3 failed on target node"
 			exit 1
 		fi
-		log_info "Waiting for SSH to become available on ${NODE_NAME}..."
+		log_info "Waiting for SSH to become available on target node..."
 		set +e
 		wait_for_ssh "${NODE_NAME}" 600
 		wst=$?
 		set -e
 		if [[ ${wst} -ne 0 ]]; then
-			log_error "Timed out waiting for SSH on ${NODE_NAME}"
+			log_error "Timed out waiting for SSH on target node"
 			exit 1
 		fi
-		log_success "SSH is now available on ${NODE_NAME}."
+		log_success "SSH is now available on target node."
 	else
-		log_warn "kadeploy3 not found. Deploy manually: kadeploy3 -a ${YAML_PATH} -m ${NODE_NAME}"
+		log_warn "kadeploy3 not found. Deploy manually: kadeploy3 -a ${YAML_PATH} -m <node>"
 	fi
 fi
+
+printf 'NODE_NAME=%s\n' "${NODE_NAME}"

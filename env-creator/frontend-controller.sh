@@ -7,7 +7,6 @@ IFS=$'\n\t'
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CONFIGS_DIR="${REPO_ROOT}/env-creator/configs"
 NODE_SCRIPT_DIR="${REPO_ROOT}/env-creator/node-build-scripts"
-DEPLOYED_NODE_FILE="${REPO_ROOT}/env-creator/current_deployed_node.txt"
 
 # -------- USER INPUT --------
 CONFIG_FILE="${1:-}" # e.g., csnn_ckplus.conf
@@ -52,13 +51,7 @@ LOCAL_SCRIPT_PATH="${NODE_SCRIPT_DIR}/${SETUP_SCRIPT}"
 mkdir -p "${TAR_BASE_DIR}"
 mkdir -p "${YAML_OUTPUT_DIR}"
 
-# -------- PRE-CHECK 1: Clean up leftover node file if present --------
-if [[ -f ${DEPLOYED_NODE_FILE} ]]; then
-	echo "Warning: Found leftover ${DEPLOYED_NODE_FILE} — deleting it."
-	rm -f "${DEPLOYED_NODE_FILE}"
-fi
-
-# -------- PRE-CHECK 2: Update-in-create behavior --------
+# -------- PRE-CHECK 1: Update-in-create behavior --------
 if [[ -f ${TAR_FILE} || -f ${YAML_FILE} ]]; then
 	echo "Detected existing artifacts for ${GENERAL_NAME}:"
 	[[ -f ${TAR_FILE} ]] && echo " - TAR:  ${TAR_FILE}"
@@ -95,9 +88,7 @@ if [[ -z ${node_name} ]]; then
 	exit 1
 fi
 
-# Save node name persistently
-echo "${node_name}" >"${DEPLOYED_NODE_FILE}"
-echo "Captured and saved machine name to ${DEPLOYED_NODE_FILE}: ${node_name}"
+echo "Captured machine name: ${node_name}"
 
 # -------- STEP 2: Copy setup script to node --------
 echo "Copying script to ${node_name}:/root/${SETUP_SCRIPT}..."
@@ -127,10 +118,6 @@ if ! tgz-g5k -m "${node_name}" -f "${TAR_FILE}"; then
 	echo "Failed to archive environment image."
 	exit 1
 fi
-
-# -------- CLEANUP: Delete node file --------
-echo "Cleaning up ${DEPLOYED_NODE_FILE} after tgz-g5k step..."
-rm -f "${DEPLOYED_NODE_FILE}"
 
 # -------- STEP 6: Generate YAML --------
 echo "Generating ${YAML_FILE}..."

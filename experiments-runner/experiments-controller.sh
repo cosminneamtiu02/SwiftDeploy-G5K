@@ -141,15 +141,56 @@ phase0_finalize_on_exit() {
 trap phase0_finalize_on_exit EXIT
 
 # --- Phase 1: Machine provisioning ---
-"${PROVISION_SCRIPT}" run \
-	--config "${CONFIG_PATH}" \
-	--log-dir "${LOG_DIR}" \
-	--state-file "${PHASE1_STATE_FILE}"
-# shellcheck source=/dev/null
-source "${PHASE1_STATE_FILE}"
+phase1_node=""
+phase1_image=""
+phase1_status=0
 
-NODE_NAME=${NODE_NAME:-""}
-IMAGE_YAML=${IMAGE_YAML:-""}
+while IFS= read -r phase1_line; do
+	case "${phase1_line}" in
+		__RESULT__*)
+			entry=${phase1_line#__RESULT__ }
+			key=${entry%%=*}
+			value=${entry#*=}
+			case "${key}" in
+				NODE_NAME)
+					phase1_node=${value}
+					;;
+				IMAGE_YAML)
+					phase1_image=${value}
+					;;
+				*)
+					die "Phase 1 provisioning produced unexpected key: ${key}"
+					;;
+			esac
+			;;
+		__STATUS__*)
+			phase1_status=${phase1_line#__STATUS__ }
+			;;
+		*)
+			printf '%s\n' "${phase1_line}"
+			;;
+	esac
+done < <(
+	{
+		# shellcheck disable=SC2312  # exit code captured via phase1_rc below
+		if "${PROVISION_SCRIPT}" run \
+			--config "${CONFIG_PATH}" \
+			--log-dir "${LOG_DIR}" \
+			--state-file "${PHASE1_STATE_FILE}"; then
+			phase1_rc=0
+		else
+			phase1_rc=$?
+		fi
+		printf '__STATUS__ %d\n' "${phase1_rc}"
+	}
+)
+
+if [[ ${phase1_status} -ne 0 ]]; then
+	die "Phase 1 provisioning failed with exit code ${phase1_status}"
+fi
+
+NODE_NAME=${phase1_node}
+IMAGE_YAML=${phase1_image}
 [[ -n ${NODE_NAME} ]] || die 'Phase 1 did not produce NODE_NAME'
 [[ -n ${IMAGE_YAML} ]] || die 'Phase 1 did not produce IMAGE_YAML'
 

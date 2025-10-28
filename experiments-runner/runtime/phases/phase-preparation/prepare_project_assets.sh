@@ -106,7 +106,7 @@ phase_run() {
 	if ! ssh -o BatchMode=yes -o StrictHostKeyChecking=no "root@${node_name}" 'echo ok' >/dev/null 2>&1; then
 		if command -v kadeploy3 >/dev/null 2>&1; then
 			log_warn "SSH not ready on ${node_name}. Deploying image via kadeploy3..."
-			if ! kadeploy3 -a "${HOME}/envs/img-files/${image_yaml}" -m "${node_name}" | tee -a "${log_dir}/kadeploy.log"; then
+			if ! kadeploy3 -a "${HOME}/envs/img-files/${image_yaml}" -m "${node_name}"; then
 				die "kadeploy3 failed for ${node_name}."
 			fi
 			log_info "Waiting for SSH to come up on ${node_name}..."
@@ -143,7 +143,6 @@ phase_run() {
 	fi
 
 	write_state_file "${state_file}" \
-		"NODE_NAME=${node_name}" \
 		"REMOTE_PREP_LOG=${remote_log}" \
 		"OS_DIST=${os_dist}"
 }
