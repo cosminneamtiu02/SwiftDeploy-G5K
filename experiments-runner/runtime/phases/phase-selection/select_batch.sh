@@ -93,8 +93,7 @@ select_batch::pick() {
 	done
 
 	if ((${#selected[@]} == 0)); then
-		log_warn 'Nothing left to run. Cleaning up done.txt and stopping.'
-		rm -f "${select_batch__done_file_ref}" 2>/dev/null || true
+		log_warn 'Nothing left to run. Stopping before execution.'
 		select_batch__selected_ref=()
 		select_batch__selected_b64_ref=""
 		return 0
