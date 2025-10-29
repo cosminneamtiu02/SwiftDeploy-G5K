@@ -57,7 +57,7 @@ controller::handle_error() {
 	log_error "Exit code: ${exit_code}"
 	ERROR_ALREADY_HANDLED=true
 	controller::revert_selection
-	trap - ERR INT
+	trap - ERR INT TERM HUP QUIT
 	exit "${exit_code}"
 }
 
@@ -65,16 +65,33 @@ controller::handle_interrupt() {
 	log_error "Execution interrupted by user during ${CURRENT_PHASE:-unknown phase}."
 	ERROR_ALREADY_HANDLED=true
 	controller::revert_selection
-	trap - ERR INT
+	trap - ERR INT TERM HUP QUIT
 	exit 130
 }
 
+controller::handle_termination() {
+	local signal="${1:-TERM}"
+	log_error "Execution terminated (${signal}) during ${CURRENT_PHASE:-unknown phase}."
+	ERROR_ALREADY_HANDLED=true
+	controller::revert_selection
+	trap - ERR INT TERM HUP QUIT
+	case "${signal}" in
+		TERM) exit 143 ;;
+		QUIT) exit 131 ;;
+		HUP) exit 129 ;;
+		*) exit 1 ;;
+	esac
+}
+
 controller::disable_failure_traps() {
-	trap - ERR INT
+	trap - ERR INT TERM HUP QUIT
 }
 
 trap 'controller::handle_error $? "${BASH_COMMAND}"' ERR
 trap controller::handle_interrupt INT
+trap 'controller::handle_termination TERM' TERM
+trap 'controller::handle_termination QUIT' QUIT
+trap 'controller::handle_termination HUP' HUP
 
 usage() {
 	cat <<'EOF'
