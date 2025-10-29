@@ -43,6 +43,7 @@ connectivity, and Grid'5000 conventions for environment management.
    - Delegate the work in parallel respecting your concurrency caps (`phase-delegation`).
    - Collect logs/artifacts back to the front-end using glob-based rules (`phase-collection`).
 4. Inspect logs under `experiments-runner/logs/` and collected artifacts under `~/public/<base_path>/` on the front-end.
+     If the run aborts, the controller restores any lines it appended to `done.txt` so unfinished parameters remain queued.
 
 All scripts are idempotent where possible so you can safely retry failed phases.
 
@@ -79,6 +80,7 @@ The script deploys the base OS, pushes your setup script, collects the resulting
 # Reserve a deployment node (pick the queue/cluster you need)
 oarsub -I -t deploy -q default
 ./experiments-runner/experiments-controller.sh --config csnn-faces.json --verbose
+# looks for `csnn-faces.json` in `experiments-configurations/` and `experiments-configurations/implementations/`
 ```
 
 The controller validates that `G5K_SSH_KEY` points to an existing private key and falls back to `~/.ssh/id_rsa` when the
@@ -87,12 +89,16 @@ variable is unset.
 The controller streams logs into `experiments-runner/logs/<timestamp>/` while the remote node receives a structured
 layout under `~/experiments_node/on-machine/`.
 
+On failure or interruption, the controller automatically rolls back the latest batch selection so the next run resumes
+exactly where it left off.
+
 ---
 
 ## 🧾 Configuration Cheat Sheet
 
 - `running_experiments.on_fe.to_do_parameters_list_path` – absolute or repo-relative path to the parameter file (one
-  experiment per line). Completed lines are tracked separately to avoid reruns.
+  experiment per line). Relative entries resolve under `experiments-runner/params/`. Each selected batch is tracked in
+  a sibling `done.txt`; failed runs remove their entries so unfinished work stays queued.
 - `running_experiments.on_machine.full_path_to_executable` – remote working directory or binary path; must exist in the
   captured image.
 - `running_experiments.on_machine.execute_command` – command invoked for each parameter line (receives the line as the
@@ -100,12 +106,19 @@ layout under `~/experiments_node/on-machine/`.
 - `running_experiments.number_of_experiments_to_run_in_parallel_on_machine` – controls concurrency for the delegation
   phase.
 - `running_experiments.experiments_collection` – optional object describing how to glob files on the node and where to
-  copy them back on the front-end.
+  copy them back on the front-end. Relative `base_path` values land under `~/public/<base_path>/`.
 - `machine_setup.image_to_use` – YAML descriptor produced by the environment creator.
 - `machine_setup.env_variables_list` – list of environment variables to persist on the remote machine before execution.
 
 See `experiments-runner/experiments-configurations/TEMPLATE.json` for a fully annotated example and
 `experiments-runner/experiments-configurations/implementations/` for concrete workloads.
+
+### Failure handling & logs
+
+- `done.txt` rollback keeps the parameter queue consistent across reruns.
+- Each phase writes a dedicated log under `experiments-runner/logs/<timestamp>/` alongside transient state files for
+  troubleshooting.
+- Artifact transfers report the exact files copied and capture diagnostics when nothing matches your patterns.
 
 ---
 

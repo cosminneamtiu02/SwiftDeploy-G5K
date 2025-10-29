@@ -1,7 +1,5 @@
 # Lookup Rules Examples (Reference Only)
 
-<!-- markdownlint-disable MD013 -->
-
 This file lists example rule labels you can copy into the `lookup_rules` array
 of your `experiments_collection` block.
 Each rule is a single-key JSON object: `{ "label": "glob" }`.
@@ -84,5 +82,3 @@ explicitly add wildcards containing `/` (not recommended here).
 ```
 
 Use only the labels you actually need. This file is illustrative; it is **not** auto-loaded by the controller.
-
-<!-- markdownlint-enable MD013 -->

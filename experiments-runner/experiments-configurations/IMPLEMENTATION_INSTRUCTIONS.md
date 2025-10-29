@@ -21,7 +21,8 @@ The controller expects a JSON file inside `experiments-runner/experiments-config
 
 - What: Path on the FE to a text file with one parameters line per experiment.
 - Format: One experiment per line, comments allowed if your executable ignores them.
-- Relative paths: Resolved under `experiments-runner/params/` inside the repo.
+- Relative paths: Resolved under `experiments-runner/params/` inside the repo; a sibling
+  `done.txt` tracks completed lines.
 - Examples:
   - `"csnn-ckplus/runs.txt"`
   - `"/absolute/path/to/my_runs.txt"`
@@ -115,6 +116,8 @@ Copy it to a new file, then substitute paths and values for your project.
 ## Tips and troubleshooting
 
 - Relative FE paths resolve under the repo default locations (e.g. `experiments-runner/params/`).
+- Failed or aborted runs automatically roll back the entries they appended to
+  `done.txt`, so you can re-run the controller without editing the params file.
 - Absolute node paths must exist after deploy; bake them into the image or ensure the preparation phase creates them.
 - Concurrency can exceed CPU cores; choose based on workload characteristics.
 - If you don’t need collection, set `experiments_collection` to `{}`.

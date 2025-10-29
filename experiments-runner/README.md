@@ -89,6 +89,10 @@ Optional:
   --verbose             Promote log level to DEBUG for all phases
 ```
 
+`--config` accepts either the filename only (`csnn-faces.json`) or a path relative to
+`experiments-configurations/`. The controller looks in both the root folder and the
+`experiments-configurations/implementations/` subdirectory.
+
 ## Configuration schema
 
 The controller resolves the config by filename inside
@@ -103,8 +107,9 @@ Important fields (see `_TEMPLATE.json`):
   - `env_variables_list` (array of single-key objects): persisted via `write-env.sh`
 - `running_experiments.on_fe`
   - `to_do_parameters_list_path` (string): relative to `experiments-runner/params/`
-    by default; accept an absolute path if the file lives elsewhere (one params
-    line per experiment)
+    by default; accepts an absolute path if the file lives elsewhere (one params
+    line per experiment). The controller appends selected lines to a sibling
+    `done.txt` and removes them again if a phase fails.
 - `running_experiments.on_machine`
   - `execute_command` (string): command to prefix to each params line
   - `full_path_to_executable` (string): absolute working directory or binary path
@@ -257,6 +262,17 @@ How to use:
 
 Note: `.gitignore` already ignores `experiments-runner/params/**/*_tracker.txt`
 so trackers won't be committed.
+
+## Selection & rollback workflow
+
+- `select_batch.sh` resolves relative parameter paths under `experiments-runner/params/`.
+- Selections respect `number_of_experiments_to_run_in_parallel_on_machine` and
+  skip lines already present in `done.txt`.
+- Every run writes the selected lines to `done.txt` before provisioning starts.
+- If any phase fails or the run is interrupted, the controller removes only the
+  entries it added so the next invocation requeues the unfinished parameters.
+- Successful runs leave the new entries in `done.txt`, allowing incremental progress
+  without editing the params file.
 
 ## Common commands
 
