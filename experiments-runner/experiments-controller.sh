@@ -43,9 +43,17 @@ controller::revert_selection() {
 	if ((${#SELECTED_PARAMS[@]} == 0)); then
 		return 0
 	fi
-	select_batch::remove_entries_from_done "${SELECTED_DONE_FILE}" "${SELECTED_PARAMS[@]}"
-	ROLLBACK_PENDING=false
-	ROLLBACK_COMPLETED=true
+	log_debug "Reverting selection in ${SELECTED_DONE_FILE} (entries=${#SELECTED_PARAMS[@]})"
+	local rollback_rc=0
+	# shellcheck disable=SC2310
+	select_batch::remove_entries_from_done "${SELECTED_DONE_FILE}" "${SELECTED_PARAMS[@]}" || rollback_rc=$?
+	if ((rollback_rc == 0)); then
+		log_info "Selection rollback completed for ${#SELECTED_PARAMS[@]} entrie(s)."
+		ROLLBACK_PENDING=false
+		ROLLBACK_COMPLETED=true
+	else
+		log_error "Selection rollback failed for ${SELECTED_DONE_FILE} (rc=${rollback_rc})"
+	fi
 	return 0
 }
 
