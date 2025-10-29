@@ -365,6 +365,12 @@ pipeline_artifact_transfer::handle_transfer() {
 		return
 	fi
 
+	log_info "Transfer ${transfer_idx}: matched ${#remote_files[@]} file(s) to copy:"
+	local matched
+	for matched in "${remote_files[@]}"; do
+		log_info "  ${matched}"
+	done
+
 	local dest_before
 	dest_before=$(find "${dest_dir}" -mindepth 1 -maxdepth 1 -printf '.' 2>/dev/null | wc -c | tr -d '[:space:]' || true)
 	log_info "Transfer ${transfer_idx}: ${#remote_files[@]} unique files from ${look_into} -> ${dest_dir}, FE entries before=${dest_before:-0}"
@@ -391,41 +397,6 @@ pipeline_artifact_transfer::handle_transfer() {
 	dest_after=$(find "${dest_dir}" -mindepth 1 -maxdepth 1 -printf '.' 2>/dev/null | wc -c | tr -d '[:space:]' || true)
 	local delta=$((${dest_after:-0} - ${dest_before:-0}))
 	log_info "Transfer ${transfer_idx} FE destination after copy: entries=${dest_after:-0} (delta=${delta})"
-	log_info "Transfer ${transfer_idx} FE destination first entries after copy:"
-	local fe_samples=()
-	local fe_tmp=""
-	fe_tmp=$(mktemp) || fe_tmp=""
-	if [[ -n ${fe_tmp} ]]; then
-		if find "${dest_dir}" -mindepth 1 -maxdepth 1 -printf '%f\n' 2>/dev/null >"${fe_tmp}"; then
-			local fe_entry
-			local fe_count=0
-			while IFS= read -r fe_entry; do
-				log_info "FE: ${fe_entry}"
-				fe_samples+=("${fe_entry}")
-				((fe_count++))
-				if ((fe_count >= 10)); then
-					break
-				fi
-			done <"${fe_tmp}"
-		fi
-		rm -f "${fe_tmp}"
-	fi
-	local fname
-	for fname in "${fe_samples[@]}"; do
-		local matches=()
-		local pattern
-		for pattern in "${patterns_ref[@]}"; do
-			if [[ ${fname} == "${pattern}" ]]; then
-				matches+=("${pattern}")
-			fi
-		done
-		if ((${#matches[@]} > 0)); then
-			log_info "FE:REASON: file '${fname}' matches patterns: ${matches[*]}"
-		else
-			log_info "FE:REASON: file '${fname}' matches no provided patterns"
-		fi
-	done
-
 	local per_pattern_after=()
 	local pattern
 	for pattern in "${patterns_ref[@]}"; do

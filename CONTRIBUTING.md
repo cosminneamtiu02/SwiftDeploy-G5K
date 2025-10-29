@@ -73,7 +73,5 @@ If hooks auto-fix a file, stage the changes and run again until everything passe
 ## 🙋 Need Help?
 
 - Read `.pre-commit-config.yaml` to understand the enforced checks.
-- Join the LinkedIn contact listed in the repository if you need maintainer assistance.
+- For any other information dont hesitate to contact me through the LinkedIn in my bio.
 - Otherwise, open an issue and describe the problem plus the context (front-end vs. node, targeted command, etc.).
-
-Happy hacking! 🚀

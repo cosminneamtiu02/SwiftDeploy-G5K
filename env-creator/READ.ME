@@ -1,29 +1,40 @@
 # Grid'5000 CSNN Image Setup
 
 This script automates:
-- Deploying a fresh OS image
+- Deploying a fresh OS image with `kadeploy3`
 - Running your setup script on the node
-- Saving the node as a reusable environment (`.tar.zst` + `.yaml`)
+- Capturing the node as a reusable environment (`.tar.zst` + `.yaml`)
 
 ---
 
-## Setup
+## Prerequisites
 
-Before running, **you must manually reserve a node**:
+- Grid'5000 account with access to a deploy queue.
+- Front-end tools: `kadeploy3`, `tgz-g5k`, `kaenv3`, `scp`, `ssh`.
+- A configuration file under `env-creator/configs/` and a matching setup script in `env-creator/node-build-scripts/`.
+
+Reserve a node before launching the controller:
+
+```
 cd SwiftDeploy-G5K
 oarsub -I -t deploy -q default
-
-This opens an interactive session with an allocated node.
+```
 
 ---
 
 ## Running the Controller
 
 Make the script executable:
-chmod +x env-creator/frontend-controller.sh
 
-Run the controller:
+```bash
+chmod +x env-creator/frontend-controller.sh
+```
+
+Run the controller (inside the interactive session):
+
+```bash
 ./env-creator/frontend-controller.sh csnn-ckplus-3d-CN.conf
+```
 
 ---
 
@@ -42,6 +53,9 @@ Run the controller:
 
 - **Generates a YAML environment description** as:
   ~/envs/img-files/<GENERAL_NAME>.yaml
+
+- **Overwrites existing artifacts safely**: if the TAR or YAML already exist, the controller
+  prompts before deleting and recreating them.
 
 - You can later redeploy this saved environment with:
   kadeploy3 -a ~/envs/img-files/<GENERAL_NAME>.yaml
@@ -65,18 +79,23 @@ Run the controller:
 
 - The script automatically cleans up the temporary node tracking file after use.
 
+- The generated YAML inherits metadata (`name`, `alias`, `description`, `author`, `file`) from
+  your config, ensuring the runner can locate it under `~/envs/img-files/`.
+
 - Redeploy the saved environment later:
   kadeploy3 -a ~/envs/img-files/<GENERAL_NAME>.yaml
 
 
 ## Example Run
 
+```bash
 cd ~
 oarsub -I -t deploy -q default
 
 chmod +x env-creator/frontend-controller.sh
 
 ./env-creator/frontend-controller.sh csnn-ckplus-3d-CN.conf
+```
 
 ---
 

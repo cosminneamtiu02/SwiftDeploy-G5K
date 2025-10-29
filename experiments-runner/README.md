@@ -58,27 +58,14 @@ Collector remote tools are uploaded per run under `/tmp/swiftdeploy_pipeline_<us
 
 ## Prerequisites
 
-- Grid’5000 access and a reachable allocation/host
-
-Environment expected for remote operations:
-
-```bash
-export G5K_USER=<user>
-export G5K_HOST=<node.your-site.grid5000.fr>
-export G5K_SSH_KEY=~/.ssh/id_rsa
-```
-
-Quick connectivity check:
-
-```bash
-ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -i "$G5K_SSH_KEY" "$G5K_USER@$G5K_HOST" true
-```
+- Grid’5000 access and a reachable allocation/host.
+- SSH private key available at `~/.ssh/id_rsa` (set `G5K_SSH_KEY` if you must use a different key).
 
 ## Quick start
 
 1. Prepare a config JSON in `experiments-configurations/`.
   Copy `_TEMPLATE.json` to `my-exp.json` or start from `csnn-faces.json`.
-2. Export environment variables `G5K_USER`, `G5K_HOST`, `G5K_SSH_KEY`.
+2. Ensure your SSH private key exists at `~/.ssh/id_rsa`; export `G5K_SSH_KEY` only if you need a different key.
 3. Launch the full workflow (selection → instantiation → preparation → delegation → collection):
 
 ```bash
@@ -102,6 +89,10 @@ Optional:
   --verbose             Promote log level to DEBUG for all phases
 ```
 
+`--config` accepts either the filename only (`csnn-faces.json`) or a path relative to
+`experiments-configurations/`. The controller looks in both the root folder and the
+`experiments-configurations/implementations/` subdirectory.
+
 ## Configuration schema
 
 The controller resolves the config by filename inside
@@ -115,15 +106,17 @@ Important fields (see `_TEMPLATE.json`):
   - `os_distribution_type` (int): 1=Debian/apt, 2=RHEL7/yum, 3=RHEL7+/dnf
   - `env_variables_list` (array of single-key objects): persisted via `write-env.sh`
 - `running_experiments.on_fe`
-  - `to_do_parameters_list_path` (string): absolute path on FE with parameters
-    (one per line)
+  - `to_do_parameters_list_path` (string): relative to `experiments-runner/params/`
+    by default; accepts an absolute path if the file lives elsewhere (one params
+    line per experiment). The controller appends selected lines to a sibling
+    `done.txt` and removes them again if a phase fails.
 - `running_experiments.on_machine`
   - `execute_command` (string): command to prefix to each params line
   - `full_path_to_executable` (string): absolute working directory or binary path
     on the machine
 - `running_experiments.number_of_experiments_to_run_in_parallel_on_machine` (int)
 - `running_experiments.experiments_collection` (object; may be empty)
-  - `base_path`: folder name (relative to `experiments-runner/collected/`) or absolute FE path where files are copied.
+  - `base_path`: folder name resolving under `~/public/` on the FE, or an absolute path used verbatim.
   - `lookup_rules`: array of `{ "label": "glob" }` entries defining glob patterns.
   - `ftransfers`: array of transfer objects containing:
     - `look_into`: absolute directory on the node to scan.
@@ -183,8 +176,8 @@ Tip: Start from `_TEMPLATE.json` and replace absolute paths and values.
 - jq not found
   - Install on FE: apt: `sudo apt-get install -y jq`, yum: `sudo yum install -y jq`, dnf: `sudo dnf install -y jq`.
 - SSH cannot connect
-  - Verify `G5K_USER/G5K_HOST/G5K_SSH_KEY`, permissions on the key (chmod 600),
-    and that the host is reachable from the FE.
+  - Ensure the target node is reachable from the FE and that your SSH key exists at
+    `${G5K_SSH_KEY:-~/.ssh/id_rsa}` with proper permissions (e.g. `chmod 600`).
 - Permission denied writing env
   - `write-env.sh` prefers `/etc/profile.d` if passwordless sudo is available; otherwise falls back to `~/.profile`.
 -- Packages fail to install
@@ -197,7 +190,7 @@ Tip: Start from `_TEMPLATE.json` and replace absolute paths and values.
 - Where did my results go?
   - Raw per-job outputs live in `~/experiments_node/on-machine/logs/` and any
     `*.txt` your executable writes under the results path.
-  - The collector pipeline copies artifacts into `experiments-runner/collected/<base_path>/<subfolder>`
+  - The collector pipeline copies artifacts into `~/public/<base_path>/<subfolder>`
     on the FE (or to your absolute `base_path` if you provided one).
 
 ## Per-project params folders
@@ -207,34 +200,24 @@ You can organize parameter lists per project inside the repo under
 contains its params file (one params line per experiment). The delegator
 tracker file is created next to that params file.
 
-Params path resolution rules (Option A behavior):
+Params path resolution rules:
 
-- The config value `running_experiments.on_fe.to_do_parameters_list_path` may
-  be either an absolute path or a repo-relative path.
-- If the value starts with `/` it is treated as an absolute path and used
-  verbatim.
-- If the value is relative, the controller resolves it under a base
-  directory `PARAMS_BASE` which defaults to `experiments-runner/params` in
-  the repo. You can override by exporting `PARAMS_BASE` in your environment
-  before running the controller:
-
-```bash
-export PARAMS_BASE=/home/youruser/SwiftDeploy-G5K/experiments-runner/params
-./experiments-runner/experiments-controller.sh --config csnn-faces.json
-```
-
-This preserves configs that already contain absolute paths (like
-`csnn-faces.json`) while allowing shorthand relative project paths for
-others (e.g. `project-a/a.txt`).
+- `running_experiments.on_fe.to_do_parameters_list_path` accepts either an
+  absolute path (used verbatim) or a path relative to
+  `experiments-runner/params/` inside the repo.
+  Relative examples such as `project-a/a.txt` automatically resolve to
+  `experiments-runner/params/project-a/a.txt`.
 
 ## Collected results base
 
-The controller now supports a repo-local base directory for collected
-results on the frontend. If your config's `experiments_collection.path_to_save_experiment_results_on_fe`
-is an absolute path it will be used as-is. If you put a project name (or
-relative path) there, the controller will resolve it under
-`experiments-runner/collected/` by default. You can override the base with
-`COLLECTED_BASE` env var.
+Provide `experiments_collection.base_path` in your configuration to control
+where transfers land on the front-end:
+
+- Absolute paths are used verbatim.
+- Relative paths resolve under `~/public/` and keep the per-transfer subfolder.
+
+By default the collector copies matched files to `~/public/<base_path>/<subfolder>`.
+Give an absolute `base_path` if you want a different root.
 
 Example:
 
@@ -254,7 +237,7 @@ Example:
 }
 ```
 
-This copies matched files under `experiments-runner/collected/csnn-ckplus/results/` on the FE.
+This copies matched files under `~/public/csnn-ckplus/results/` on the FE.
 If you provide an absolute `base_path`, it will be used as-is.
 
 Example layout:
@@ -271,14 +254,25 @@ experiments-runner/params/
 
 How to use:
 
-- Put your params file at the absolute path your FE will have after you
-  clone the repo on the frontend (e.g. `/home/feuser/SwiftDeploy-G5K/experiments-runner/params/project-a/a.txt`).
-- Set `running_experiments.on_fe.to_do_parameters_list_path` in the config
-  to that absolute path. The delegator will create `${params_file%.txt}_tracker.txt`
+- Store params inside the repo (e.g. `experiments-runner/params/project-a/a.txt`).
+- Set `running_experiments.on_fe.to_do_parameters_list_path` to a path
+  relative to `experiments-runner/params/` or provide an absolute path if
+  the file lives elsewhere. The delegator will create `${params_file%.txt}_tracker.txt`
   next to the params file to keep track of completed lines.
 
 Note: `.gitignore` already ignores `experiments-runner/params/**/*_tracker.txt`
 so trackers won't be committed.
+
+## Selection & rollback workflow
+
+- `select_batch.sh` resolves relative parameter paths under `experiments-runner/params/`.
+- Selections respect `number_of_experiments_to_run_in_parallel_on_machine` and
+  skip lines already present in `done.txt`.
+- Every run writes the selected lines to `done.txt` before provisioning starts.
+- If any phase fails or the run is interrupted, the controller removes only the
+  entries it added so the next invocation requeues the unfinished parameters.
+- Successful runs leave the new entries in `done.txt`, allowing incremental progress
+  without editing the params file.
 
 ## Common commands
 

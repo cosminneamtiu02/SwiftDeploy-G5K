@@ -53,34 +53,22 @@ pipeline_artifact_logging::log_prescan() {
 		fi
 		return
 	fi
-	local src_pwd
-	src_pwd=$(sed -n 's/^PRE:pwd=\(.*\)$/\1/p;q' <<<"${prescan_output}")
-	if [[ -n ${src_pwd} ]]; then
-		log_info "Transfer ${transfer_idx} source prescan dir: ${src_pwd}"
-	fi
-	local entries
-	entries=$(sed -n 's/^PRE:entries_total="\([0-9]\+\)".*/\1/p;q' <<<"${prescan_output}")
-	local regular
-	regular=$(sed -n 's/^PRE:regular_total="\([0-9]\+\)".*/\1/p;q' <<<"${prescan_output}")
-	log_info "Transfer ${transfer_idx} source prescan: entries=${entries:-0}, regular_files=${regular:-0}"
-	local prescan_list
-	prescan_list=$(sed -n 's/^PRE:list://p' <<<"${prescan_output}")
-	while IFS= read -r entry; do
-		[[ -n ${entry} ]] && log_info "SRC: ${entry}"
-	done <<<"${prescan_list}"
 	local pattern
 	for pattern in "${patterns_ref[@]}"; do
-		log_info "SRC:pattern '${pattern}' -> matches:"
 		local escaped
 		escaped=$(printf '%s' "${pattern}" | sed 's/[\\.*\[\]\^$]/\\&/g')
+		local count
+		count=$(sed -n "s/^PREPAT:count:\"${escaped}\":\([0-9]\+\)$/\1/p" <<<"${prescan_output}")
+		count=${count:-0}
+		if ((count == 0)); then
+			continue
+		fi
+		log_info "SRC matches for pattern '${pattern}' (${count}):"
 		local match_lines
 		match_lines=$(sed -n "s/^PREPAT:match:\"${escaped}\":\"\(.*\)\"/\1/p" <<<"${prescan_output}")
 		while IFS= read -r match; do
-			[[ -n ${match} ]] && log_info "SRC:  ${match}"
+			[[ -n ${match} ]] && log_info "  ${match}"
 		done <<<"${match_lines}"
-		if grep -q "^PREPAT:nomatch:\"${escaped}\"$" <<<"${prescan_output}"; then
-			log_info 'SRC:  <no matches>'
-		fi
 	done
 }
 
