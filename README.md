@@ -42,8 +42,7 @@ connectivity, and Grid'5000 conventions for environment management.
    - Prepare remote folders, env vars, and helper scripts (`phase-preparation`).
    - Delegate the work in parallel respecting your concurrency caps (`phase-delegation`).
    - Collect logs/artifacts back to the front-end using glob-based rules (`phase-collection`).
-4. Inspect logs under `experiments-runner/logs/` and downloaded artifacts under `experiments-runner/collected/` (or your
-   custom destination).
+4. Inspect logs under `experiments-runner/logs/` and collected artifacts under `~/public/<base_path>/` on the front-end.
 
 All scripts are idempotent where possible so you can safely retry failed phases.
 
@@ -77,16 +76,13 @@ The script deploys the base OS, pushes your setup script, collects the resulting
 ### 2. Run a Batch of Experiments
 
 ```bash
-export G5K_USER=<login>
-export G5K_HOST=<node.your-site.grid5000.fr>
-export G5K_SSH_KEY=~/.ssh/id_rsa
-
-# Optional overrides (defaults shown)
-export PARAMS_BASE="$(pwd)/experiments-runner/params"
-export COLLECTED_BASE="$(pwd)/experiments-runner/collected"
-
+# Reserve a deployment node (pick the queue/cluster you need)
+oarsub -I -t deploy -q default
 ./experiments-runner/experiments-controller.sh --config csnn-faces.json --verbose
 ```
+
+The controller validates that `G5K_SSH_KEY` points to an existing private key and falls back to `~/.ssh/id_rsa` when the
+variable is unset.
 
 The controller streams logs into `experiments-runner/logs/<timestamp>/` while the remote node receives a structured
 layout under `~/experiments_node/on-machine/`.

@@ -91,6 +91,17 @@ controller::handle_termination() {
 	esac
 }
 
+controller::ensure_ssh_identity() {
+	local default_key="${HOME}/.ssh/id_rsa"
+	local key_path="${G5K_SSH_KEY:-${default_key}}"
+	if [[ ! -f ${key_path} ]]; then
+		die "SSH identity not found. Set G5K_SSH_KEY to your private key path (e.g., export G5K_SSH_KEY=${default_key})."
+	fi
+	G5K_SSH_KEY="${key_path}"
+	export G5K_SSH_KEY
+	log_debug "Using SSH identity ${G5K_SSH_KEY}"
+}
+
 controller::disable_failure_traps() {
 	trap - ERR INT TERM HUP QUIT
 }
@@ -138,6 +149,8 @@ if [[ ${VERBOSE} == true ]]; then
 else
 	export LOG_LEVEL=${LOG_LEVEL:-info}
 fi
+
+controller::ensure_ssh_identity
 
 find_config_path() {
 	local name="$1"
